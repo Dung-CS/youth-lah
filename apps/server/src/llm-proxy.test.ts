@@ -157,5 +157,59 @@ describe("Layer 2: Host-Side LLM Secret Broker & Reverse Proxy", () => {
     // Verify host master key was injected
     expect(interceptedAuthHeader).toBe("Bearer ark-real-secret-key-12345");
   });
+
+  it("strips unsupported fields like external_web_access from request body before forwarding to Ark", async () => {
+    const sessionToken = SecretBroker.issueAgentSession(agentId);
+    const config = loadConfig({
+      NODE_ENV: "development",
+      HOST: "127.0.0.1",
+      ARK_API_KEY: "ark-real-secret-key-12345",
+      ARK_MODEL: "ep-test-model",
+      ARK_BASE_URL: "https://ark.cn-beijing.volces.com/api/v3",
+    });
+
+    let interceptedBody = "";
+
+    const fetchMock = vi.fn().mockImplementation((_url: string, init: RequestInit) => {
+      interceptedBody = (init.body as string) ?? "";
+      return Promise.resolve(
+        new Response(JSON.stringify({ id: "chat-456", choices: [{ message: { content: "OK" } }] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const app = await createApp(config, mockService);
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/internal/llm-proxy/${agentId}/chat/completions`,
+      headers: {
+        authorization: `Bearer ${sessionToken}`,
+        "content-type": "application/json",
+      },
+      payload: {
+        model: "ep-test-model",
+        messages: [{ role: "user", content: "Write a hello world script" }],
+        tools: [
+          {
+            type: "function",
+            function: { name: "bash", description: "Execute bash" },
+            external_web_access: false,
+          },
+        ],
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(interceptedBody).not.toContain("external_web_access");
+    const parsedBody = JSON.parse(interceptedBody);
+    expect(parsedBody.tools[0].type).toBe("function");
+    expect(parsedBody.tools[0].function.name).toBe("bash");
+    expect(parsedBody.tools[0].external_web_access).toBeUndefined();
+  });
 });
+
 

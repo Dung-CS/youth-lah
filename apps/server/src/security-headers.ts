@@ -1,23 +1,47 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AppConfig } from "./config.js";
 
-export const DEFAULT_CSP = [
-  "default-src 'self'",
-  "script-src 'self'",
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data:",
-  "connect-src 'self'",
-  "font-src 'self'",
-  "object-src 'none'",
-  "base-uri 'self'",
-  "form-action 'self'",
-  "frame-ancestors 'none'",
-].join("; ");
+export function buildCsp(isDev = false): string {
+  if (isDev) {
+    return [
+      "default-src 'self'",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+      "style-src 'self' 'unsafe-inline' https: http:",
+      "style-src-elem 'self' 'unsafe-inline' https: http:",
+      "style-src-attr 'self' 'unsafe-inline'",
+      "img-src 'self' data: blob: https: http:",
+      "connect-src 'self' ws: wss: http://localhost:5173 http://127.0.0.1:5173",
+      "font-src 'self' data: https: http:",
+      "object-src 'none'",
+      "base-uri 'self'",
+      "form-action 'self'",
+      "frame-ancestors 'none'",
+    ].join("; ");
+  }
+
+  return [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline'",
+    "style-src 'self' 'unsafe-inline' https:",
+    "style-src-elem 'self' 'unsafe-inline' https:",
+    "style-src-attr 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob: https:",
+    "connect-src 'self'",
+    "font-src 'self' data: https:",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+  ].join("; ");
+}
 
 export function registerSecurityHeaders(app: FastifyInstance, config?: AppConfig): void {
+  const isDev = config?.nodeEnv === "development";
+  const cspHeader = buildCsp(isDev);
+
   app.addHook("onSend", async (_request: FastifyRequest, reply: FastifyReply) => {
     // 1. Content Security Policy (Prevents XSS, untrusted script execution, clickjacking framing)
-    reply.header("Content-Security-Policy", DEFAULT_CSP);
+    reply.header("Content-Security-Policy", cspHeader);
 
     // 2. Anti-Clickjacking
     reply.header("X-Frame-Options", "DENY");

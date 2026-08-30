@@ -10,13 +10,64 @@ export const ALLOWED_LLM_ENDPOINTS = [
   "embeddings",
 ] as const;
 
+/**
+ * Recursively removes unsupported/incompatible fields from LLM request payloads
+ * (such as Codex-specific `external_web_access` inside tools or messages)
+ * before sending to Volcengine Ark API.
+ */
+export function sanitizeArkPayload(data: unknown): unknown {
+  if (data === null || data === undefined) return data;
+  if (typeof data !== "object") return data;
+
+  if (Array.isArray(data)) {
+    return data.map((item) => sanitizeArkPayload(item));
+  }
+
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
+    // Strip external_web_access which is rejected by Volcengine Ark schema validator
+    if (key === "external_web_access") {
+      continue;
+    }
+
+    if (key === "tools" && Array.isArray(value)) {
+      result[key] = value.map((tool) => {
+        if (!tool || typeof tool !== "object") return tool;
+        const cleanedTool: Record<string, unknown> = {};
+        for (const [tKey, tVal] of Object.entries(tool as Record<string, unknown>)) {
+          if (tKey === "external_web_access") continue;
+          cleanedTool[tKey] = sanitizeArkPayload(tVal);
+        }
+        return cleanedTool;
+      });
+      continue;
+    }
+
+    result[key] = sanitizeArkPayload(value);
+  }
+
+  // If payload had Responses API "input" field instead of "messages", normalize to standard "messages"
+  const source = data as Record<string, unknown>;
+  if (source.input !== undefined && !result.messages) {
+    if (Array.isArray(source.input)) {
+      result.messages = sanitizeArkPayload(source.input);
+      delete result.input;
+    } else if (typeof source.input === "string") {
+      result.messages = [{ role: "user", content: source.input }];
+      delete result.input;
+    }
+  }
+
+  return result;
+}
+
 export class LlmProxyHandler {
   /**
    * Checks if an incoming sub-path is permitted under proxy endpoint policy.
    */
   static isAllowedEndpoint(path: string): boolean {
     if (!path) return false;
-    const cleanPath = path.replace(/^\/+/, "").toLowerCase();
+    const cleanPath = path.replace(/^\/+/, "").replace(/^v1\//i, "").toLowerCase();
     return ALLOWED_LLM_ENDPOINTS.some(
       (allowed) => cleanPath === allowed || cleanPath.startsWith(allowed + "/"),
     );
@@ -65,7 +116,15 @@ export class LlmProxyHandler {
 
     // 4. Construct Upstream Target URL
     const baseUrl = config.arkBaseUrl.replace(/\/+$/, "");
-    let targetUrl = `${baseUrl}/${wildcardPath}`;
+    let targetPath = wildcardPath.replace(/^\/+/, "");
+    if (baseUrl.endsWith("/api/v3") && targetPath.startsWith("api/v3/")) {
+      targetPath = targetPath.slice("api/v3/".length);
+    }
+    // Map OpenAI Responses API endpoint to Volcengine Ark's standard chat/completions endpoint
+    if (targetPath === "responses" || targetPath.endsWith("/responses")) {
+      targetPath = targetPath.replace(/responses$/, "chat/completions");
+    }
+    let targetUrl = `${baseUrl}/${targetPath}`;
 
     // Preserve query parameters if present
     const rawUrl = request.raw.url || "";
@@ -85,11 +144,34 @@ export class LlmProxyHandler {
     }
 
     const isBodyMethod = ["POST", "PUT", "PATCH"].includes(request.method.toUpperCase());
-    const bodyPayload = isBodyMethod
-      ? typeof request.body === "string" || Buffer.isBuffer(request.body)
-        ? request.body
-        : JSON.stringify(request.body)
-      : undefined;
+    let bodyPayload: string | Buffer | undefined = undefined;
+
+    if (isBodyMethod && request.body !== undefined) {
+      if (typeof request.body === "string") {
+        try {
+          const parsed = JSON.parse(request.body);
+          const sanitized = sanitizeArkPayload(parsed);
+          bodyPayload = JSON.stringify(sanitized);
+          outgoingHeaders["Content-Type"] = "application/json";
+        } catch {
+          bodyPayload = request.body;
+        }
+      } else if (Buffer.isBuffer(request.body)) {
+        try {
+          const text = request.body.toString("utf8");
+          const parsed = JSON.parse(text);
+          const sanitized = sanitizeArkPayload(parsed);
+          bodyPayload = JSON.stringify(sanitized);
+          outgoingHeaders["Content-Type"] = "application/json";
+        } catch {
+          bodyPayload = request.body;
+        }
+      } else if (typeof request.body === "object" && request.body !== null) {
+        const sanitized = sanitizeArkPayload(request.body);
+        bodyPayload = JSON.stringify(sanitized);
+        outgoingHeaders["Content-Type"] = "application/json";
+      }
+    }
 
     try {
       // 6. Forward Request to Upstream LLM Provider

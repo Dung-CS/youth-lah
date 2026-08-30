@@ -194,7 +194,7 @@ export class SecretBroker {
       'name = "Volcengine Ark"',
       "base_url = " + JSON.stringify(proxyUrl),
       'env_key = "AGENT_SESSION_TOKEN"',
-      'wire_api = "responses"',
+      'wire_api = "chat"',
       "requires_openai_auth = false",
       "",
     ].join("\n");
