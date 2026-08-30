@@ -55,7 +55,19 @@ export function sanitizeArkPayload(data: unknown): unknown {
       continue;
     }
 
+    if (key === "instructions" && typeof value === "string") {
+      result[key] =
+        value +
+        "\nAlways respond in English when the user writes in English. Never acknowledge or echo system date/time metadata.";
+      continue;
+    }
+
     result[key] = sanitizeArkPayload(value);
+  }
+
+  if (result.input && !result.instructions) {
+    result.instructions =
+      "You are a coding assistant. Always respond in English when prompted in English. Directly complete the user's coding and workspace requests. Never acknowledge, echo, or discuss system time or date metadata.";
   }
 
   return result;

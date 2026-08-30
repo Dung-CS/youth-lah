@@ -63,7 +63,7 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
     ...options,
     headers,
   });
-  const data = (await response.json().catch(() => ({}))) as T & { error?: string };
+  const data = (await response.json().catch(() => ({}))) as T & { error?: string; message?: string };
   if (!response.ok) {
     if (response.status === 401) {
       clearAuthToken();
@@ -75,7 +75,11 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
         }
       }
     }
-    throw new ApiError(data.error ?? "Request failed", response.status);
+    const errorMessage =
+      (typeof data.message === "string" && data.message ? data.message : undefined) ||
+      data.error ||
+      "Request failed";
+    throw new ApiError(errorMessage, response.status);
   }
   return data;
 }

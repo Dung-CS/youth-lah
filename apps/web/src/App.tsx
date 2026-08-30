@@ -331,7 +331,7 @@ export default function App() {
           {error && <div className="error-banner" role="alert">{error}</div>}
           <label>
             Access token
-            <div style={{ display: "flex", gap: "0.5rem" }}>
+            <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
               <input
                 autoFocus
                 type={showPassword ? "text" : "password"}
@@ -339,14 +339,30 @@ export default function App() {
                 onChange={(event) => setAuthInput(event.target.value)}
                 autoComplete="current-password"
                 required
-                style={{ flex: 1 }}
+                style={{ paddingRight: "56px" }}
               />
               <button
                 type="button"
-                className="button button-ghost"
                 onClick={() => setShowPassword((prev) => !prev)}
                 aria-label={showPassword ? "Hide password" : "Show password"}
-                style={{ padding: "0 0.75rem" }}
+                style={{
+                  position: "absolute",
+                  right: "8px",
+                  width: "auto",
+                  minHeight: "26px",
+                  height: "26px",
+                  padding: "0 8px",
+                  fontSize: "11px",
+                  fontWeight: 600,
+                  background: "#f0efea",
+                  color: "#464741",
+                  border: "1px solid #e4e2da",
+                  borderRadius: "6px",
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
               >
                 {showPassword ? "Hide" : "Show"}
               </button>
