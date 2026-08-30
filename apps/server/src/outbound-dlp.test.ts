@@ -83,6 +83,48 @@ describe("OutboundDlpRedactor", () => {
       );
       expect(result.hadViolations).toBe(true);
     });
+
+    it("redacts Anthropic API keys", () => {
+      const fakeKey = "sk-ant-" + "api03-1234567890abcdefghijklmnopqrstuvwxyz";
+      const sample = `ANTHROPIC_API_KEY=${fakeKey}`;
+      const result = OutboundDlpRedactor.redact(sample);
+
+      expect(result.redactedText).toBe("ANTHROPIC_API_KEY=[REDACTED:ANTHROPIC_KEY]");
+      expect(result.hadViolations).toBe(true);
+    });
+
+    it("redacts Slack webhook URLs and tokens", () => {
+      const fakeWebhook =
+        "https://hooks.slack.com/services/" + "T12345678/B12345678/abcdef1234567890";
+      const fakeToken = "xoxb-" + "1234567890-1234567890123-abcdefghijklmnopqrstuv";
+
+      expect(OutboundDlpRedactor.redact(`Post to ${fakeWebhook}`).redactedText).toBe(
+        "Post to [REDACTED:SLACK_WEBHOOK]",
+      );
+      expect(OutboundDlpRedactor.redact(`Token: ${fakeToken}`).redactedText).toBe(
+        "Token: [REDACTED:SLACK_TOKEN]",
+      );
+    });
+
+    it("redacts Stripe, GitLab, HuggingFace, and NPM tokens", () => {
+      const fakeStripe = "sk_live_" + "1234567890abcdefghijklmnopqrstuv";
+      const fakeGitlab = "glpat-" + "1234567890abcdefghij";
+      const fakeHf = "hf_" + "abcdefghijklmnopqrstuvwxyz12345678";
+      const fakeNpm = "npm_" + "1234567890abcdefghijklmnopqrstuv12";
+
+      expect(OutboundDlpRedactor.redact(`stripe=${fakeStripe}`).redactedText).toBe(
+        "stripe=[REDACTED:STRIPE_KEY]",
+      );
+      expect(OutboundDlpRedactor.redact(`gitlab=${fakeGitlab}`).redactedText).toBe(
+        "gitlab=[REDACTED:GITLAB_TOKEN]",
+      );
+      expect(OutboundDlpRedactor.redact(`hf=${fakeHf}`).redactedText).toBe(
+        "hf=[REDACTED:HUGGINGFACE_TOKEN]",
+      );
+      expect(OutboundDlpRedactor.redact(`npm=${fakeNpm}`).redactedText).toBe(
+        "npm=[REDACTED:NPM_TOKEN]",
+      );
+    });
   });
 
   describe("Cryptographic Private Key Redaction", () => {

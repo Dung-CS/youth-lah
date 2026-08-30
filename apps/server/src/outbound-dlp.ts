@@ -47,11 +47,11 @@ const STATIC_DLP_RULES: StaticDlpRule[] = [
     replacement: "[REDACTED:PRIVATE_KEY]",
   },
 
-  // 2. OpenAI API Keys
+  // 2. OpenAI API Keys (sk-... but not sk-ant-...)
   {
     category: "API_KEY",
     description: "OpenAI Secret Key",
-    pattern: /\b(?:sk-[a-zA-Z0-9_-]{20,}|sk-proj-[a-zA-Z0-9_-]{20,})\b/g,
+    pattern: /\b(?:sk-(?!ant-)[a-zA-Z0-9_-]{20,}|sk-proj-[a-zA-Z0-9_-]{20,})\b/g,
     replacement: "[REDACTED:OPENAI_API_KEY]",
   },
 
@@ -85,6 +85,66 @@ const STATIC_DLP_RULES: StaticDlpRule[] = [
     description: "Google Cloud API Key",
     pattern: /\bAIza[0-9A-Za-z-_]{35}\b/g,
     replacement: "[REDACTED:GOOGLE_API_KEY]",
+  },
+
+  // 7. Anthropic API Keys
+  {
+    category: "API_KEY",
+    description: "Anthropic API Key",
+    pattern: /\bsk-ant-[a-zA-Z0-9_-]{20,}\b/g,
+    replacement: "[REDACTED:ANTHROPIC_KEY]",
+  },
+
+  // 8. Slack Webhooks and Tokens
+  {
+    category: "API_KEY",
+    description: "Slack Incoming Webhook URL",
+    pattern: /https:\/\/hooks\.slack\.com\/services\/T[a-zA-Z0-9_]+\/B[a-zA-Z0-9_]+\/[a-zA-Z0-9_]+/g,
+    replacement: "[REDACTED:SLACK_WEBHOOK]",
+  },
+  {
+    category: "API_KEY",
+    description: "Slack OAuth / Bot Token",
+    pattern: /\bxox[baprs]-[a-zA-Z0-9-]{10,}\b/g,
+    replacement: "[REDACTED:SLACK_TOKEN]",
+  },
+
+  // 9. Stripe API Keys
+  {
+    category: "API_KEY",
+    description: "Stripe API Key",
+    pattern: /\b(?:sk|pk)_(?:test|live)_[a-zA-Z0-9]{24,}\b/g,
+    replacement: "[REDACTED:STRIPE_KEY]",
+  },
+
+  // 10. GitLab Personal Access Tokens
+  {
+    category: "API_KEY",
+    description: "GitLab Token",
+    pattern: /\bglpat-[a-zA-Z0-9_-]{20,}\b/g,
+    replacement: "[REDACTED:GITLAB_TOKEN]",
+  },
+
+  // 11. HuggingFace Tokens
+  {
+    category: "API_KEY",
+    description: "Hugging Face Access Token",
+    pattern: /\bhf_[a-zA-Z0-9]{34,}\b/g,
+    replacement: "[REDACTED:HUGGINGFACE_TOKEN]",
+  },
+
+  // 12. Package Registry Publishing Tokens (NPM, PyPI)
+  {
+    category: "API_KEY",
+    description: "NPM Access Token",
+    pattern: /\bnpm_[a-zA-Z0-9]{32,}\b/g,
+    replacement: "[REDACTED:NPM_TOKEN]",
+  },
+  {
+    category: "API_KEY",
+    description: "PyPI Upload Token",
+    pattern: /\bpypi-AgEIcHlwaS5vcmc[a-zA-Z0-9_-]{50,}\b/g,
+    replacement: "[REDACTED:PYPI_TOKEN]",
   },
 
   // 7. JWT and Bearer Tokens

@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import type { AppConfig } from "./config.js";
 import { HttpError } from "./errors.js";
+import { OutboundDlpRedactor } from "./outbound-dlp.js";
 import type { AgentService } from "./agent-service.js";
 
 const agentIdParams = z.object({ id: z.string().uuid() });
@@ -160,8 +161,11 @@ export async function createApp(
     if (statusCode >= 500) {
       request.log.error(appError);
     }
+    const sanitizedError = OutboundDlpRedactor.redact(appError.message, {
+      config,
+    }).redactedText;
     return reply.code(statusCode).send({
-      error: appError.message,
+      error: sanitizedError,
       ...(validationError ? { details: error.issues } : {}),
     });
   });

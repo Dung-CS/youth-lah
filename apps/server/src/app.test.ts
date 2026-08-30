@@ -72,5 +72,28 @@ describe("HTTP boundary", () => {
     });
     await app.close();
   });
+
+  it("sanitizes leaked secrets from internal error messages in HTTP responses", async () => {
+    const mockService = {
+      ...service,
+      listAgents: () => {
+        throw new Error(
+          "Database query failed on postgres://admin:SuperSecretPass123!@db.internal:5432/agents_prod",
+        );
+      },
+    } as unknown as AgentService;
+
+    const app = await createApp(loadConfig({ NODE_ENV: "test" }), mockService);
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/agents",
+    });
+
+    expect(response.statusCode).toBe(500);
+    const body = response.json() as { error: string };
+    expect(body.error).toContain("[REDACTED:DB_PASSWORD]");
+    expect(body.error).not.toContain("SuperSecretPass123!");
+    await app.close();
+  });
 });
 
