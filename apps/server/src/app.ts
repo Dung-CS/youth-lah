@@ -8,6 +8,9 @@ import type { AppConfig } from "./config.js";
 import { HttpError } from "./errors.js";
 import { ErrorSanitizer } from "./error-sanitizer.js";
 import { OutboundDlpRedactor } from "./outbound-dlp.js";
+import { registerSecurityHeaders } from "./security-headers.js";
+import { registerRateLimiter } from "./rate-limiter.js";
+import { registerCsrfGuard } from "./csrf-guard.js";
 import type { AgentService } from "./agent-service.js";
 
 const agentIdParams = z.object({ id: z.string().uuid() });
@@ -36,6 +39,11 @@ export async function createApp(
     },
     bodyLimit: 1_048_576,
   });
+
+  // Layer 1 Defenses: HTTP Security Headers, Rate Limiting, CSRF Protection
+  registerSecurityHeaders(app, config);
+  registerRateLimiter(app);
+  registerCsrfGuard(app, config);
 
   await app.register(cors, {
     origin:
