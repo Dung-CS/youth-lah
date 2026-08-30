@@ -2,6 +2,7 @@ import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
 import type { AppConfig } from "./config.js";
 import { buildCodexArgs, parseCodexEventLine } from "./codex-runner.js";
+import { EgressNetworkFilter } from "./egress-network-filter.js";
 import { RunCancelledError } from "./errors.js";
 import { SecretBroker } from "./secret-broker.js";
 import type {
@@ -56,8 +57,7 @@ export function buildContainerRunArgs(
     "--label",
     "io.codejam.instance-id=" + config.runtimeInstanceId,
     ...(engineName === "podman" ? ["--userns", "keep-id"] : []),
-    "--network",
-    "bridge",
+    ...EgressNetworkFilter.buildContainerNetworkArgs(config),
     "--security-opt",
     "no-new-privileges",
     "--cap-drop",

@@ -44,6 +44,18 @@ const envSchema = z.object({
     .string()
     .url()
     .default("https://ark.cn-beijing.volces.com/api/v3"),
+  EGRESS_NETWORK_MODE: z.enum(["none", "restricted", "bridge"]).default("restricted"),
+  EGRESS_ALLOWLIST: z
+    .string()
+    .default("")
+    .transform((val) =>
+      val
+        ? val
+            .split(",")
+            .map((s) => s.trim().toLowerCase())
+            .filter(Boolean)
+        : [],
+    ),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
 });
 
@@ -87,6 +99,8 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env) {
     arkApiKey: env.ARK_API_KEY?.trim() ?? "",
     arkModel: env.ARK_MODEL?.trim() ?? "",
     arkBaseUrl: env.ARK_BASE_URL.replace(/\/+$/, ""),
+    egressNetworkMode: env.EGRESS_NETWORK_MODE,
+    egressAllowlist: env.EGRESS_ALLOWLIST,
     nodeEnv: env.NODE_ENV,
   };
 }

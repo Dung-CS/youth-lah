@@ -60,4 +60,47 @@ describe("Container Codex runner", () => {
     expect(args.slice(-3)).toEqual(["resume", "thread-123", "continue"]);
     expect(args).not.toContain("keep-id");
   });
+
+  it("mounts isolated per-agent codex-home when provided", () => {
+    const config = loadConfig({
+      NODE_ENV: "test",
+      CODEX_HOME: "/tmp/codex-home",
+      RUNTIME_PROVIDER: "container",
+    });
+    const isolatedHome = "/tmp/codex-home/agents/agent-123";
+    const args = buildContainerRunArgs(
+      {
+        agentId: "agent-123",
+        workspacePath: "/tmp/workspace",
+        prompt: "test",
+        threadId: null,
+      },
+      config,
+      isolatedHome,
+    );
+    expect(args).toContain(
+      "type=bind,src=/tmp/codex-home/agents/agent-123,dst=/codex-home",
+    );
+  });
+
+  it("applies air-gapped --network none when EGRESS_NETWORK_MODE is 'none'", () => {
+    const config = loadConfig({
+      NODE_ENV: "test",
+      CODEX_HOME: "/tmp/codex-home",
+      RUNTIME_PROVIDER: "container",
+      EGRESS_NETWORK_MODE: "none",
+    });
+    const args = buildContainerRunArgs(
+      {
+        agentId: "agent-123",
+        workspacePath: "/tmp/workspace",
+        prompt: "offline work",
+        threadId: null,
+      },
+      config,
+    );
+    expect(args).toContain("--network");
+    expect(args).toContain("none");
+    expect(args).not.toContain("bridge");
+  });
 });
