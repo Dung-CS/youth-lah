@@ -9,6 +9,8 @@ import { HttpError } from "./errors.js";
 import { ErrorSanitizer } from "./error-sanitizer.js";
 import { OutboundDlpRedactor } from "./outbound-dlp.js";
 import type { AgentService } from "./agent-service.js";
+import { consumeRateLimit } from "./rate-limit.js";
+
 
 const agentIdParams = z.object({ id: z.string().uuid() });
 const runIdParams = z.object({ id: z.string().uuid() });
