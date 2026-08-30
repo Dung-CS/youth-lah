@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import type { AppConfig } from "./config.js";
 import { HttpError } from "./errors.js";
+import { ErrorSanitizer } from "./error-sanitizer.js";
 import { OutboundDlpRedactor } from "./outbound-dlp.js";
 import type { AgentService } from "./agent-service.js";
 
@@ -144,30 +145,12 @@ export async function createApp(
   }
 
   app.setErrorHandler((error, request, reply) => {
-    const appError = error instanceof Error ? error : new Error(String(error));
-    const validationError = error instanceof z.ZodError;
-    const frameworkStatus =
-      typeof (error as { statusCode?: unknown }).statusCode === "number"
-        ? (error as { statusCode: number }).statusCode
-        : null;
-    const statusCode =
-      error instanceof HttpError
-        ? error.statusCode
-        : validationError
-          ? 400
-          : frameworkStatus && frameworkStatus >= 400 && frameworkStatus <= 599
-            ? frameworkStatus
-            : 500;
-    if (statusCode >= 500) {
-      request.log.error(appError);
+    const payload = ErrorSanitizer.sanitizeError(error, config);
+    if (payload.statusCode >= 500) {
+      request.log.error(error);
     }
-    const sanitizedError = OutboundDlpRedactor.redact(appError.message, {
-      config,
-    }).redactedText;
-    return reply.code(statusCode).send({
-      error: sanitizedError,
-      ...(validationError ? { details: error.issues } : {}),
-    });
+    const { statusCode, ...body } = payload;
+    return reply.code(statusCode).send(body);
   });
 
   return app;

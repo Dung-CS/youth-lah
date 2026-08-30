@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { AppConfig } from "./config.js";
 import { isArkConfigured } from "./config.js";
 import { HttpError, RunCancelledError } from "./errors.js";
+import { ErrorSanitizer } from "./error-sanitizer.js";
 import { InboundGuard } from "./inbound-guard.js";
 import { OutboundDlpRedactor } from "./outbound-dlp.js";
 import { SecretBroker } from "./secret-broker.js";
@@ -259,9 +260,10 @@ export class AgentService {
         prompt: run.prompt,
         threadId: agentAtStart.codexThreadId,
       });
-      const sanitizedOutput = OutboundDlpRedactor.redact(result.output, {
+      const redactedOutput = OutboundDlpRedactor.redact(result.output, {
         config: this.config,
       }).redactedText;
+      const sanitizedOutput = ErrorSanitizer.maskPaths(redactedOutput, this.config);
       const completedAt = now();
       await this.store.mutate((database) => {
         const storedRun = database.runs.find((item) => item.id === run.id);
@@ -288,9 +290,10 @@ export class AgentService {
       const completedAt = now();
       const cancelled = error instanceof RunCancelledError;
       const rawMessage = error instanceof Error ? error.message : String(error);
-      const sanitizedError = OutboundDlpRedactor.redact(rawMessage, {
+      const redactedError = OutboundDlpRedactor.redact(rawMessage, {
         config: this.config,
       }).redactedText;
+      const sanitizedError = ErrorSanitizer.maskPaths(redactedError, this.config);
       await this.store.mutate((database) => {
         const storedRun = database.runs.find((item) => item.id === run.id);
         const agent = database.agents.find((item) => item.id === agentAtStart.id);
