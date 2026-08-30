@@ -123,6 +123,8 @@ export async function createApp(
   app.post("/api/agents/:id/messages", async (request, reply) => {
     const { id } = agentIdParams.parse(request.params);
     const body = messageBody.parse(request.body);
+    const rate = consumeRateLimit(`agent:${id}`,3,60_000);
+    if (!rate.allowed) {return reply.code(429).send({error: "Rate limit exceeded",retryAfterMs: rate.retryAfterMs,});}
     const result = await service.sendMessage(id, body.content);
     return reply.code(202).send(result);
   });
