@@ -164,4 +164,39 @@ describe("Agent lifecycle", () => {
     expect(service.getMessages(agent.id)).toHaveLength(0);
     expect(service.getAgent(agent.id).status).toBe("ready");
   });
+
+  it("automatically redacts leaked secrets and PII from runner outputs before saving", async () => {
+    let finishRun!: (result: { output: string; threadId: string | null; usage: null }) => void;
+    const runnerPromise = new Promise<{ output: string; threadId: string | null; usage: null }>(
+      (resolve) => {
+        finishRun = resolve;
+      },
+    );
+    const service = await makeService({
+      run: async () => runnerPromise,
+      cancel: async () => true,
+      isAvailable: async () => true,
+    });
+    const agent = await service.createAgent({ name: "DlpAgent" });
+    const { run } = await service.sendMessage(agent.id, "Generate configuration");
+
+    finishRun({
+      output: "Here is your config: sk-proj-12345678901234567890abcdef and contact admin@internal.com",
+      threadId: "thread-123",
+      usage: null,
+    });
+
+    await expect.poll(() => service.getRun(run.id).status).toBe("completed");
+
+    const completedRun = service.getRun(run.id);
+    expect(completedRun.output).toContain("[REDACTED:OPENAI_API_KEY]");
+    expect(completedRun.output).toContain("[REDACTED:EMAIL]");
+    expect(completedRun.output).not.toContain("sk-proj-12345678901234567890abcdef");
+    expect(completedRun.output).not.toContain("admin@internal.com");
+
+    const messages = service.getMessages(agent.id);
+    const assistantMessage = messages.find((m) => m.role === "assistant");
+    expect(assistantMessage?.content).toContain("[REDACTED:OPENAI_API_KEY]");
+    expect(assistantMessage?.content).toContain("[REDACTED:EMAIL]");
+  });
 });

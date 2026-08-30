@@ -3,6 +3,7 @@ import type { AppConfig } from "./config.js";
 import { isArkConfigured } from "./config.js";
 import { HttpError, RunCancelledError } from "./errors.js";
 import { InboundGuard } from "./inbound-guard.js";
+import { OutboundDlpRedactor } from "./outbound-dlp.js";
 import { SecretBroker } from "./secret-broker.js";
 import { JsonStore } from "./store.js";
 import type {
@@ -258,13 +259,16 @@ export class AgentService {
         prompt: run.prompt,
         threadId: agentAtStart.codexThreadId,
       });
+      const sanitizedOutput = OutboundDlpRedactor.redact(result.output, {
+        config: this.config,
+      }).redactedText;
       const completedAt = now();
       await this.store.mutate((database) => {
         const storedRun = database.runs.find((item) => item.id === run.id);
         const agent = database.agents.find((item) => item.id === agentAtStart.id);
         if (!storedRun || !agent) return;
         storedRun.status = "completed";
-        storedRun.output = result.output;
+        storedRun.output = sanitizedOutput;
         storedRun.usage = result.usage;
         storedRun.completedAt = completedAt;
         database.messages.push({
@@ -272,7 +276,7 @@ export class AgentService {
           agentId: agent.id,
           runId: run.id,
           role: "assistant",
-          content: result.output,
+          content: sanitizedOutput,
           createdAt: completedAt,
         });
         agent.status = "ready";
@@ -283,20 +287,23 @@ export class AgentService {
     } catch (error) {
       const completedAt = now();
       const cancelled = error instanceof RunCancelledError;
-      const message = error instanceof Error ? error.message : String(error);
+      const rawMessage = error instanceof Error ? error.message : String(error);
+      const sanitizedError = OutboundDlpRedactor.redact(rawMessage, {
+        config: this.config,
+      }).redactedText;
       await this.store.mutate((database) => {
         const storedRun = database.runs.find((item) => item.id === run.id);
         const agent = database.agents.find((item) => item.id === agentAtStart.id);
         if (storedRun) {
           storedRun.status = cancelled ? "cancelled" : "failed";
-          storedRun.error = message;
+          storedRun.error = sanitizedError;
           storedRun.completedAt = completedAt;
         }
         if (agent) {
           if (agent.status !== "stopped") {
             agent.status = cancelled ? "ready" : "error";
           }
-          agent.lastError = cancelled ? null : message;
+          agent.lastError = cancelled ? null : sanitizedError;
           agent.updatedAt = completedAt;
         }
       });
