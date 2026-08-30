@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import type { AppConfig } from "./config.js";
 import { isArkConfigured } from "./config.js";
 import { HttpError, RunCancelledError } from "./errors.js";
+import { InboundGuard } from "./inbound-guard.js";
+import { SecretBroker } from "./secret-broker.js";
 import { JsonStore } from "./store.js";
 import type {
   Agent,
@@ -65,9 +67,9 @@ export class AgentService {
     const id = randomUUID();
     const agent: Agent = {
       id,
-      name: input.name.trim(),
-      description: input.description?.trim() ?? "",
-      instructions: input.instructions?.trim() ?? "",
+      name: InboundGuard.sanitize(input.name),
+      description: input.description ? InboundGuard.sanitize(input.description) : "",
+      instructions: input.instructions ? InboundGuard.sanitize(input.instructions) : "",
       status: "ready",
       workspacePath: this.workspaces.workspacePath(id),
       codexThreadId: null,
@@ -93,9 +95,13 @@ export class AgentService {
       if (agent.status === "busy") {
         throw new HttpError(409, "Stop the active run before editing this Agent");
       }
-      if (input.name !== undefined) agent.name = input.name.trim();
-      if (input.description !== undefined) agent.description = input.description.trim();
-      if (input.instructions !== undefined) agent.instructions = input.instructions.trim();
+      if (input.name !== undefined) agent.name = InboundGuard.sanitize(input.name);
+      if (input.description !== undefined) {
+        agent.description = InboundGuard.sanitize(input.description);
+      }
+      if (input.instructions !== undefined) {
+        agent.instructions = InboundGuard.sanitize(input.instructions);
+      }
       agent.lastError = null;
       agent.updatedAt = now();
       return structuredClone(agent);
@@ -108,6 +114,7 @@ export class AgentService {
     const agent = this.getAgent(id);
     await this.cancelExecution(id);
     const archivedWorkspace = await this.workspaces.archive(agent);
+    await SecretBroker.cleanupAgentCodexHome(id, this.config.codexHome);
     await this.store.mutate((database) => {
       database.agents = database.agents.filter((item) => item.id !== id);
       database.messages = database.messages.filter((item) => item.agentId !== id);
@@ -154,6 +161,7 @@ export class AgentService {
     agentId: string,
     prompt: string,
   ): Promise<{ run: AgentRun; message: Message }> {
+    const sanitizedPrompt = InboundGuard.validateOrThrow(prompt);
     if (!isArkConfigured(this.config)) {
       throw new HttpError(
         503,
@@ -166,7 +174,7 @@ export class AgentService {
       id: runId,
       agentId,
       status: "queued",
-      prompt,
+      prompt: sanitizedPrompt,
       output: null,
       error: null,
       usage: null,
@@ -179,7 +187,7 @@ export class AgentService {
       agentId,
       runId,
       role: "user",
-      content: prompt,
+      content: sanitizedPrompt,
       createdAt: timestamp,
     };
     const agentAtStart = await this.store.mutate((database) => {

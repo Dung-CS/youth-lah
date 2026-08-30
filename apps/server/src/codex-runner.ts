@@ -3,6 +3,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
 import type { AppConfig } from "./config.js";
 import { RunCancelledError } from "./errors.js";
+import { SecretBroker } from "./secret-broker.js";
 import type {
   AgentRunner,
   RunUsage,
@@ -129,10 +130,14 @@ export class CodexRunner implements AgentRunner {
       throw new Error("Agent already has an active Codex process");
     }
 
+    const agentCodexHome = await SecretBroker.ensureAgentCodexHome(
+      request.agentId,
+      this.config,
+    );
     const args = buildCodexArgs(request, this.config.codexSandboxMode);
     const child = spawn(this.config.codexBin, args, {
       cwd: request.workspacePath,
-      env: this.childEnvironment(),
+      env: this.childEnvironment(agentCodexHome),
       stdio: ["ignore", "pipe", "pipe"],
     });
     const settled = new Promise<void>((resolve) => {
@@ -239,29 +244,13 @@ export class CodexRunner implements AgentRunner {
     }
   }
 
-  private childEnvironment(): NodeJS.ProcessEnv {
-    const inheritedNames = [
-      "PATH",
-      "HOME",
-      "TMPDIR",
-      "LANG",
-      "LC_ALL",
-      "SSL_CERT_FILE",
-      "SSL_CERT_DIR",
-      "HTTP_PROXY",
-      "HTTPS_PROXY",
-      "NO_PROXY",
-      "NODE_EXTRA_CA_CERTS",
-      "TERM",
-    ] as const;
-    const environment: NodeJS.ProcessEnv = {
-      CODEX_HOME: this.config.codexHome,
-      ARK_API_KEY: this.config.arkApiKey,
-      NO_COLOR: "1",
-    };
-    for (const name of inheritedNames) {
-      if (process.env[name] !== undefined) environment[name] = process.env[name];
-    }
-    return environment;
+  private childEnvironment(agentCodexHome?: string): NodeJS.ProcessEnv {
+    return SecretBroker.sanitizeEnvironment(process.env, {
+      overrides: {
+        CODEX_HOME: agentCodexHome || this.config.codexHome,
+        ARK_API_KEY: this.config.arkApiKey,
+        NO_COLOR: "1",
+      },
+    });
   }
 }

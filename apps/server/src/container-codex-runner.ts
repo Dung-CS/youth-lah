@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import type { AppConfig } from "./config.js";
 import { buildCodexArgs, parseCodexEventLine } from "./codex-runner.js";
 import { RunCancelledError } from "./errors.js";
+import { SecretBroker } from "./secret-broker.js";
 import type {
   AgentRunner,
   RunUsage,
@@ -38,6 +39,7 @@ export function containerName(agentId: string, instanceId = "default"): string {
 export function buildContainerRunArgs(
   request: RunnerRequest,
   config: AppConfig,
+  agentCodexHome = config.codexHome,
 ): string[] {
   const name = containerName(request.agentId, config.runtimeInstanceId);
   const engineName = config.containerEngine.split(/[\\/]/).at(-1)?.toLowerCase();
@@ -79,7 +81,7 @@ export function buildContainerRunArgs(
     "--mount",
     "type=bind,src=" + request.workspacePath + ",dst=/workspace",
     "--mount",
-    "type=bind,src=" + config.codexHome + ",dst=/codex-home",
+    "type=bind,src=" + agentCodexHome + ",dst=/codex-home",
     "--workdir",
     "/workspace",
     config.containerRuntimeImage,
@@ -142,9 +144,13 @@ export class ContainerCodexRunner implements AgentRunner {
       throw new Error("Agent already has an active Runtime container");
     }
 
+    const agentCodexHome = await SecretBroker.ensureAgentCodexHome(
+      request.agentId,
+      this.config,
+    );
     const child = spawn(
       this.config.containerEngine,
-      buildContainerRunArgs(request, this.config),
+      buildContainerRunArgs(request, this.config, agentCodexHome),
       {
         cwd: request.workspacePath,
         env: this.childEnvironment(),
@@ -236,20 +242,11 @@ export class ContainerCodexRunner implements AgentRunner {
   }
 
   private childEnvironment(): NodeJS.ProcessEnv {
-    const environment: NodeJS.ProcessEnv = {
-      ARK_API_KEY: this.config.arkApiKey,
-      NO_COLOR: "1",
-    };
-    for (const name of [
-      "PATH",
-      "HOME",
-      "TMPDIR",
-      "LANG",
-      "LC_ALL",
-      "XDG_RUNTIME_DIR",
-    ] as const) {
-      if (process.env[name] !== undefined) environment[name] = process.env[name];
-    }
-    return environment;
+    return SecretBroker.sanitizeEnvironment(process.env, {
+      overrides: {
+        ARK_API_KEY: this.config.arkApiKey,
+        NO_COLOR: "1",
+      },
+    });
   }
 }

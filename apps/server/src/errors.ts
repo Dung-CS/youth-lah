@@ -14,3 +14,14 @@ export class RunCancelledError extends Error {
     this.name = "RunCancelledError";
   }
 }
+
+export class SecurityViolationError extends HttpError {
+  constructor(
+    message: string,
+    public readonly category?: string,
+    public readonly reason?: string,
+  ) {
+    super(400, message);
+    this.name = "SecurityViolationError";
+  }
+}
