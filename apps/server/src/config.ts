@@ -126,7 +126,7 @@ export async function writeCodexConfig(config: AppConfig): Promise<void> {
     'name = "Volcengine Ark"',
     "base_url = " + JSON.stringify(proxyUrl),
     'env_key = "AGENT_SESSION_TOKEN"',
-    'wire_api = "chat"',
+    'wire_api = "responses"',
     "requires_openai_auth = false",
     "",
   ].join("\n");

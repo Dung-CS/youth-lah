@@ -210,6 +210,77 @@ describe("Layer 2: Host-Side LLM Secret Broker & Reverse Proxy", () => {
     expect(parsedBody.tools[0].function.name).toBe("bash");
     expect(parsedBody.tools[0].external_web_access).toBeUndefined();
   });
+
+  it("successfully proxies OpenAI Responses API payload with input intact and strips external_web_access", async () => {
+    const sessionToken = SecretBroker.issueAgentSession(agentId);
+    const config = loadConfig({
+      NODE_ENV: "development",
+      HOST: "127.0.0.1",
+      ARK_API_KEY: "ark-real-secret-key-12345",
+      ARK_MODEL: "ep-test-model",
+      ARK_BASE_URL: "https://ark.ap-southeast.bytepluses.com/api/v3",
+    });
+
+    let interceptedTargetUrl = "";
+    let interceptedBody = "";
+
+    const fetchMock = vi.fn().mockImplementation((url: string, init: RequestInit) => {
+      interceptedTargetUrl = url;
+      interceptedBody = (init.body as string) ?? "";
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            id: "resp-789",
+            output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: "Hello" }] }],
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const app = await createApp(config, mockService);
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/internal/llm-proxy/${agentId}/responses`,
+      headers: {
+        authorization: `Bearer ${sessionToken}`,
+        "content-type": "application/json",
+      },
+      payload: {
+        model: "ep-test-model",
+        input: [
+          {
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: "Say hello in one word" }],
+          },
+        ],
+        tools: [
+          {
+            type: "function",
+            name: "bash",
+            description: "Run command",
+            parameters: { type: "object", properties: {} },
+            external_web_access: false,
+          },
+        ],
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(interceptedTargetUrl).toBe("https://ark.ap-southeast.bytepluses.com/api/v3/responses");
+    const parsedBody = JSON.parse(interceptedBody);
+    expect(parsedBody.input).toBeDefined();
+    expect(Array.isArray(parsedBody.input)).toBe(true);
+    expect(parsedBody.tools[0].external_web_access).toBeUndefined();
+    expect(res.json().id).toBe("resp-789");
+  });
 });
+
 
 

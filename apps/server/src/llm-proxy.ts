@@ -43,19 +43,19 @@ export function sanitizeArkPayload(data: unknown): unknown {
       continue;
     }
 
-    result[key] = sanitizeArkPayload(value);
-  }
-
-  // If payload had Responses API "input" field instead of "messages", normalize to standard "messages"
-  const source = data as Record<string, unknown>;
-  if (source.input !== undefined && !result.messages) {
-    if (Array.isArray(source.input)) {
-      result.messages = sanitizeArkPayload(source.input);
-      delete result.input;
-    } else if (typeof source.input === "string") {
-      result.messages = [{ role: "user", content: source.input }];
-      delete result.input;
+    if (key === "input" && Array.isArray(value)) {
+      result[key] = value.map((item) => {
+        if (!item || typeof item !== "object") return item;
+        const cleanedItem = sanitizeArkPayload(item) as Record<string, unknown>;
+        if (typeof cleanedItem === "object" && cleanedItem !== null && !cleanedItem.status) {
+          cleanedItem.status = "completed";
+        }
+        return cleanedItem;
+      });
+      continue;
     }
+
+    result[key] = sanitizeArkPayload(value);
   }
 
   return result;
@@ -67,7 +67,11 @@ export class LlmProxyHandler {
    */
   static isAllowedEndpoint(path: string): boolean {
     if (!path) return false;
-    const cleanPath = path.replace(/^\/+/, "").replace(/^v1\//i, "").toLowerCase();
+    const cleanPath = path
+      .replace(/^\/+/, "")
+      .replace(/^api\/v3\//i, "")
+      .replace(/^v1\//i, "")
+      .toLowerCase();
     return ALLOWED_LLM_ENDPOINTS.some(
       (allowed) => cleanPath === allowed || cleanPath.startsWith(allowed + "/"),
     );
@@ -120,9 +124,8 @@ export class LlmProxyHandler {
     if (baseUrl.endsWith("/api/v3") && targetPath.startsWith("api/v3/")) {
       targetPath = targetPath.slice("api/v3/".length);
     }
-    // Map OpenAI Responses API endpoint to Volcengine Ark's standard chat/completions endpoint
-    if (targetPath === "responses" || targetPath.endsWith("/responses")) {
-      targetPath = targetPath.replace(/responses$/, "chat/completions");
+    if (targetPath.startsWith("v1/")) {
+      targetPath = targetPath.slice("v1/".length);
     }
     let targetUrl = `${baseUrl}/${targetPath}`;
 
@@ -183,6 +186,7 @@ export class LlmProxyHandler {
         fetchOptions.body = bodyPayload;
       }
 
+      request.log.info({ targetUrl, bodyPayload }, "LLM proxy forwarding payload");
       const upstreamResponse = await fetch(targetUrl, fetchOptions);
 
       reply.code(upstreamResponse.status);
