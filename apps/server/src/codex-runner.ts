@@ -130,14 +130,16 @@ export class CodexRunner implements AgentRunner {
       throw new Error("Agent already has an active Codex process");
     }
 
+    const sessionToken = SecretBroker.issueAgentSession(request.agentId);
     const agentCodexHome = await SecretBroker.ensureAgentCodexHome(
       request.agentId,
       this.config,
+      { proxyHost: "127.0.0.1" },
     );
     const args = buildCodexArgs(request, this.config.codexSandboxMode);
     const child = spawn(this.config.codexBin, args, {
       cwd: request.workspacePath,
-      env: this.childEnvironment(agentCodexHome),
+      env: this.childEnvironment(agentCodexHome, sessionToken),
       stdio: ["ignore", "pipe", "pipe"],
     });
     const settled = new Promise<void>((resolve) => {
@@ -228,6 +230,7 @@ export class CodexRunner implements AgentRunner {
     } finally {
       clearTimeout(timeout);
       if (active.forceKillTimer) clearTimeout(active.forceKillTimer);
+      SecretBroker.revokeAgentSession(request.agentId);
       this.active.delete(request.agentId);
     }
   }
@@ -244,11 +247,11 @@ export class CodexRunner implements AgentRunner {
     }
   }
 
-  private childEnvironment(agentCodexHome?: string): NodeJS.ProcessEnv {
+  private childEnvironment(agentCodexHome?: string, sessionToken?: string): NodeJS.ProcessEnv {
     return SecretBroker.sanitizeEnvironment(process.env, {
       overrides: {
         CODEX_HOME: agentCodexHome || this.config.codexHome,
-        ARK_API_KEY: this.config.arkApiKey,
+        ...(sessionToken ? { AGENT_SESSION_TOKEN: sessionToken } : {}),
         NO_COLOR: "1",
       },
     });

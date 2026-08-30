@@ -66,8 +66,8 @@ export class CsrfGuard {
 
 export function registerCsrfGuard(app: FastifyInstance, config?: AppConfig): void {
   app.addHook("onRequest", async (request: FastifyRequest, reply: FastifyReply) => {
-    // Only guard API routes
-    if (!request.url.startsWith("/api/")) {
+    // Only guard public API routes (skip internal agent proxy)
+    if (!request.url.startsWith("/api/") || request.url.startsWith("/api/internal/llm-proxy/")) {
       return;
     }
 

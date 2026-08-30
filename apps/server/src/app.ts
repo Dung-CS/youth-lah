@@ -11,6 +11,7 @@ import { OutboundDlpRedactor } from "./outbound-dlp.js";
 import { registerSecurityHeaders } from "./security-headers.js";
 import { registerRateLimiter } from "./rate-limiter.js";
 import { registerCsrfGuard } from "./csrf-guard.js";
+import { registerLlmProxy } from "./llm-proxy.js";
 import type { AgentService } from "./agent-service.js";
 
 const agentIdParams = z.object({ id: z.string().uuid() });
@@ -45,6 +46,9 @@ export async function createApp(
   registerRateLimiter(app);
   registerCsrfGuard(app, config);
 
+  // Layer 2 Defenses: Host-Side LLM Secret Broker & Reverse Proxy
+  registerLlmProxy(app, config);
+
   await app.register(cors, {
     origin:
       config.nodeEnv === "development"
@@ -57,7 +61,8 @@ export async function createApp(
       !config.authToken ||
       !request.url.startsWith("/api/") ||
       request.url === "/api/health" ||
-      request.url === "/api/auth"
+      request.url === "/api/auth" ||
+      request.url.startsWith("/api/internal/llm-proxy/")
     ) {
       return;
     }

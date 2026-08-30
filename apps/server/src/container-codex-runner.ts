@@ -41,6 +41,7 @@ export function buildContainerRunArgs(
   request: RunnerRequest,
   config: AppConfig,
   agentCodexHome = config.codexHome,
+  sessionToken = "",
 ): string[] {
   const name = containerName(request.agentId, config.runtimeInstanceId);
   const engineName = config.containerEngine.split(/[\\/]/).at(-1)?.toLowerCase();
@@ -56,6 +57,8 @@ export function buildContainerRunArgs(
     "io.codejam.agent-id=" + request.agentId,
     "--label",
     "io.codejam.instance-id=" + config.runtimeInstanceId,
+    "--add-host",
+    "host.docker.internal:host-gateway",
     ...(engineName === "podman" ? ["--userns", "keep-id"] : []),
     ...EgressNetworkFilter.buildContainerNetworkArgs(config),
     "--security-opt",
@@ -71,7 +74,7 @@ export function buildContainerRunArgs(
     "--user",
     config.containerUser,
     "--env",
-    "ARK_API_KEY",
+    "AGENT_SESSION_TOKEN=" + sessionToken,
     "--env",
     "CODEX_HOME=/codex-home",
     "--env",
@@ -81,8 +84,7 @@ export function buildContainerRunArgs(
     "--mount",
     "type=bind,src=" + request.workspacePath + ",dst=/workspace",
     "--mount",
-    "type=bind,src=" + agentCodexHome + ",dst=/codex-home",
-    "--workdir",
+    "type=bind,src=" + agentCodexHome + ",dst=/codex-home,readonly",
     "/workspace",
     config.containerRuntimeImage,
     "codex",
@@ -144,15 +146,15 @@ export class ContainerCodexRunner implements AgentRunner {
       throw new Error("Agent already has an active Runtime container");
     }
 
+    const sessionToken = SecretBroker.issueAgentSession(request.agentId);
     const agentCodexHome = await SecretBroker.ensureAgentCodexHome(
       request.agentId,
       this.config,
     );
-    const child = spawn(
+    const runArgs = buildContainerRunArgs(request, this.config, agentCodexHome, sessionToken);
       this.config.containerEngine,
-      buildContainerRunArgs(request, this.config, agentCodexHome),
+      runArgs,
       {
-        cwd: request.workspacePath,
         env: this.childEnvironment(),
         stdio: ["ignore", "pipe", "pipe"],
       },
@@ -237,6 +239,7 @@ export class ContainerCodexRunner implements AgentRunner {
       return { output, threadId: parsed.threadId, usage: parsed.usage };
     } finally {
       clearTimeout(timeout);
+      SecretBroker.revokeAgentSession(request.agentId);
       this.active.delete(request.agentId);
     }
   }
@@ -244,7 +247,6 @@ export class ContainerCodexRunner implements AgentRunner {
   private childEnvironment(): NodeJS.ProcessEnv {
     return SecretBroker.sanitizeEnvironment(process.env, {
       overrides: {
-        ARK_API_KEY: this.config.arkApiKey,
         NO_COLOR: "1",
       },
     });

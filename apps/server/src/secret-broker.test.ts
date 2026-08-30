@@ -159,6 +159,8 @@ describe("SecretBroker", () => {
       const content = await readFile(configFile, "utf8");
       expect(content).toContain('model = "ep-test-model"');
       expect(content).toContain('name = "Volcengine Ark"');
+      expect(content).toContain('env_key = "AGENT_SESSION_TOKEN"');
+      expect(content).toContain("/api/internal/llm-proxy/agent-alpha-1");
 
       // Check file permissions (owner readable/writable)
       const fileStat = await stat(configFile);
@@ -192,6 +194,40 @@ describe("SecretBroker", () => {
       expect(path.dirname(homeA)).toBe(path.dirname(homeB));
       expect(path.basename(homeA)).toBe("agent-aaa");
       expect(path.basename(homeB)).toBe("agent-bbb");
+    });
+  });
+
+  describe("Agent Session Management", () => {
+    it("issues and verifies active agent session tokens", () => {
+      const agentId = "agent-123";
+      const token = SecretBroker.issueAgentSession(agentId);
+
+      expect(token).toMatch(/^ast_[a-f0-9]{48}$/);
+      expect(SecretBroker.verifyAgentSession(agentId, token)).toBe(true);
+    });
+
+    it("rejects incorrect or mismatched tokens", () => {
+      const agentId = "agent-123";
+      const token = SecretBroker.issueAgentSession(agentId);
+
+      expect(SecretBroker.verifyAgentSession(agentId, "ast_wrong_token_12345")).toBe(false);
+      expect(SecretBroker.verifyAgentSession("other-agent", token)).toBe(false);
+    });
+
+    it("revokes session tokens immediately", () => {
+      const agentId = "agent-456";
+      const token = SecretBroker.issueAgentSession(agentId);
+      expect(SecretBroker.verifyAgentSession(agentId, token)).toBe(true);
+
+      SecretBroker.revokeAgentSession(agentId);
+      expect(SecretBroker.verifyAgentSession(agentId, token)).toBe(false);
+    });
+
+    it("rejects expired session tokens", () => {
+      const agentId = "agent-expired";
+      const token = SecretBroker.issueAgentSession(agentId, undefined, -1000); // already expired
+
+      expect(SecretBroker.verifyAgentSession(agentId, token)).toBe(false);
     });
   });
 });
