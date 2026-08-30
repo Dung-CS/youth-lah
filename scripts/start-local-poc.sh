@@ -63,6 +63,27 @@ detect_engine() {
   return 1
 }
 
+# Load repository configuration from .env. Variables already present in the
+# environment win, so inline overrides such as
+# "ARK_API_KEY=key ./scripts/start-local-poc.sh" keep working.
+env_file="${LAUNCHPAD_ENV_FILE:-$repo_dir/.env}"
+if [[ -f "$env_file" ]]; then
+  log "Loading environment from $env_file"
+  while IFS= read -r env_line || [[ -n "$env_line" ]]; do
+    if [[ ! "$env_line" =~ ^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+      continue
+    fi
+    env_key="${BASH_REMATCH[2]}"
+    env_value="${BASH_REMATCH[3]}"
+    case "$env_value" in
+      \"*\"|\'*\') env_value="${env_value:1:${#env_value}-2}" ;;
+    esac
+    if [[ -z "${!env_key:-}" ]]; then
+      export "$env_key=$env_value"
+    fi
+  done <"$env_file"
+fi
+
 if [[ -z "${ARK_API_KEY:-}" || -z "${ARK_MODEL:-}" ]]; then
   log "ARK_API_KEY and ARK_MODEL are required."
   log "Example: ARK_API_KEY=key ARK_MODEL=ep-id ./scripts/start-local-poc.sh"
@@ -105,6 +126,18 @@ else
   export CODEX_HOME="${CODEX_HOME:-$local_state_root/codex-home}"
 fi
 export RUNTIME_INSTANCE_ID="${RUNTIME_INSTANCE_ID:-local-$(id -u)-$(printf '%s' "$repo_dir" | cksum | awk '{print $1}')}"
+
+# The container engine only accepts absolute bind-mount sources, and .env may
+# carry the repo-relative paths the README suggests for non-Docker runs.
+absolute_path() {
+  case "$1" in
+    /*) printf '%s' "$1" ;;
+    *) printf '%s' "$repo_dir/${1#./}" ;;
+  esac
+}
+export APP_DATA_DIR="$(absolute_path "$APP_DATA_DIR")"
+export AGENT_WORKSPACE_ROOT="$(absolute_path "$AGENT_WORKSPACE_ROOT")"
+export CODEX_HOME="$(absolute_path "$CODEX_HOME")"
 
 mkdir -p "$APP_DATA_DIR" "$AGENT_WORKSPACE_ROOT" "$CODEX_HOME"
 log "Persistent state: $local_state_root"

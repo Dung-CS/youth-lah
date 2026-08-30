@@ -1,6 +1,39 @@
+import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
+
+// apps/server/{src,dist}/config.{ts,js} -> repository root.
+const repositoryRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+  "..",
+);
+
+/**
+ * Loads the repository .env into process.env before the schema runs. Real
+ * environment variables win, so Docker Compose env_file, systemd, and inline
+ * `ARK_API_KEY=... npm run poc` overrides keep their precedence. A missing
+ * file is not an error: container images ship without one.
+ */
+export function loadEnvFile(
+  envFile = process.env.LAUNCHPAD_ENV_FILE ?? path.join(repositoryRoot, ".env"),
+): string | undefined {
+  const resolved = path.resolve(envFile);
+  if (!existsSync(resolved)) {
+    return undefined;
+  }
+  const preset = { ...process.env };
+  process.loadEnvFile(resolved);
+  for (const [key, value] of Object.entries(preset)) {
+    if (value !== undefined) {
+      process.env[key] = value;
+    }
+  }
+  return resolved;
+}
 
 const envSchema = z.object({
   HOST: z.string().default("0.0.0.0"),
