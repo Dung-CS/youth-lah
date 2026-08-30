@@ -7,7 +7,7 @@ const buckets = new Map<string, Bucket>();
 
 export function consumeRateLimit(
   key: string,
-  limit = 5,
+  limit = 3,
   windowMs = 60_000
 ) {
   const now = Date.now();
