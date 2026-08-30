@@ -34,6 +34,7 @@ describe("Container Codex runner", () => {
     expect(args).toContain("runtime:test");
     expect(args).toContain("type=bind,src=/tmp/agent-workspace,dst=/workspace");
     expect(args).toContain("type=bind,src=/tmp/codex-home,dst=/codex-home,readonly");
+    expect(args).toContain("501:20");
     expect(args).toContain("workspace-write");
     expect(args).toContain("/workspace");
     expect(args).toContain("io.codejam.instance-id=test-instance");
@@ -41,6 +42,9 @@ describe("Container Codex runner", () => {
     expect(args).toContain("--add-host");
     expect(args).toContain("host.docker.internal:host-gateway");
     expect(args).toContain("--read-only");
+    expect(args).toContain("--tmpfs");
+    expect(args).toContain("/tmp:rw,nosuid,size=128m");
+    expect(args).toContain("AGENT_SESSION_TOKEN=");
     expect(args).not.toContain("ARK_API_KEY");
     expect(args).not.toContain("secret-that-must-not-appear-in-argv");
   });
@@ -84,6 +88,7 @@ describe("Container Codex runner", () => {
     expect(args).toContain(
       "type=bind,src=/tmp/codex-home/agents/agent-123,dst=/codex-home,readonly",
     );
+  });
 
   it("applies air-gapped --network none when EGRESS_NETWORK_MODE is 'none'", () => {
     const config = loadConfig({

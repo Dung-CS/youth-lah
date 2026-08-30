@@ -5,6 +5,7 @@ import { buildCodexArgs, parseCodexEventLine } from "./codex-runner.js";
 import { EgressNetworkFilter } from "./egress-network-filter.js";
 import { RunCancelledError } from "./errors.js";
 import { SecretBroker } from "./secret-broker.js";
+import { ContainerSecurityGuard } from "./container-security-guard.js";
 import type {
   AgentRunner,
   RunUsage,
@@ -65,6 +66,11 @@ export function buildContainerRunArgs(
     "no-new-privileges",
     "--cap-drop",
     "ALL",
+    "--read-only",
+    "--tmpfs",
+    "/tmp:rw,nosuid,size=128m",
+    "--tmpfs",
+    "/run:rw,nosuid,size=16m",
     "--cpus",
     String(config.containerCpuLimit),
     "--memory",
@@ -85,6 +91,7 @@ export function buildContainerRunArgs(
     "type=bind,src=" + request.workspacePath + ",dst=/workspace",
     "--mount",
     "type=bind,src=" + agentCodexHome + ",dst=/codex-home,readonly",
+    "--workdir",
     "/workspace",
     config.containerRuntimeImage,
     "codex",
@@ -152,9 +159,13 @@ export class ContainerCodexRunner implements AgentRunner {
       this.config,
     );
     const runArgs = buildContainerRunArgs(request, this.config, agentCodexHome, sessionToken);
+    ContainerSecurityGuard.validateOrThrow(runArgs);
+
+    const child = spawn(
       this.config.containerEngine,
       runArgs,
       {
+        cwd: request.workspacePath,
         env: this.childEnvironment(),
         stdio: ["ignore", "pipe", "pipe"],
       },
