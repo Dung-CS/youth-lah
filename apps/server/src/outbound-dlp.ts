@@ -24,9 +24,9 @@ export interface RedactionResult {
 }
 
 export interface DlpOptions {
-  config?: AppConfig;
-  redactPii?: boolean;
-  customSecrets?: string[];
+  config?: AppConfig | undefined;
+  redactPii?: boolean | undefined;
+  customSecrets?: string[] | undefined;
 }
 
 interface StaticDlpRule {
