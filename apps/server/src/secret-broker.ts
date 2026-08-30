@@ -80,13 +80,24 @@ export class SecretBroker {
   /**
    * Ensures an isolated CODEX_HOME directory exists for an agent and writes
    * its private configuration with restricted permissions (0o600).
+   *
+   * Containerised runs pass overrides so Codex authenticates against the
+   * in-process credential proxy with a run token instead of holding the Ark
+   * key. Local process runs omit them and keep the direct Ark endpoint.
    */
   static async ensureAgentCodexHome(
     agentId: string,
     config: AppConfig,
+    overrides?: {
+      baseUrl?: string | undefined;
+      envKey?: string | undefined;
+    },
   ): Promise<string> {
     const agentHome = this.getAgentCodexHome(agentId, config.codexHome);
     await mkdir(agentHome, { recursive: true, mode: 0o700 });
+
+    const baseUrl = overrides?.baseUrl || config.arkBaseUrl;
+    const envKey = overrides?.envKey || "ARK_API_KEY";
 
     const toml = [
       "# Isolated Codex configuration for agent " + agentId,
@@ -95,8 +106,8 @@ export class SecretBroker {
       "",
       "[model_providers.volcengine_ark]",
       'name = "Volcengine Ark"',
-      "base_url = " + JSON.stringify(config.arkBaseUrl),
-      'env_key = "ARK_API_KEY"',
+      "base_url = " + JSON.stringify(baseUrl),
+      "env_key = " + JSON.stringify(envKey),
       'wire_api = "responses"',
       "requires_openai_auth = false",
       "",

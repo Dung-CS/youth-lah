@@ -5,6 +5,7 @@ import { timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import type { AppConfig } from "./config.js";
+import { registerArkProxy, type RunTokenRegistry } from "./credential-proxy.js";
 import { HttpError } from "./errors.js";
 import { ErrorSanitizer } from "./error-sanitizer.js";
 import { OutboundDlpRedactor } from "./outbound-dlp.js";
@@ -28,6 +29,7 @@ const messageBody = z.object({
 export async function createApp(
   config: AppConfig,
   service: AgentService,
+  runTokens?: RunTokenRegistry,
 ): Promise<FastifyInstance> {
   const app = Fastify({
     logger: {
@@ -64,6 +66,13 @@ export async function createApp(
       return reply.code(401).send({ error: "Authentication required" });
     }
   });
+
+  // Runtime containers authenticate here with a per-run token, not the shared
+  // APP_AUTH_TOKEN, so this prefix sits outside the /api/ auth hook above and
+  // guards itself. Registered before the static handler claims unknown routes.
+  if (runTokens) {
+    await registerArkProxy(app, config, runTokens);
+  }
 
   app.get("/api/health", async () => ({
     ok: true,

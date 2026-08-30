@@ -170,6 +170,52 @@ describe("SecretBroker", () => {
       await expect(access(agentHome)).rejects.toThrow();
     });
 
+    it("points config.toml at the credential proxy when overrides are given", async () => {
+      const root = await mkdtemp(path.join(tmpdir(), "launchpad-proxy-toml-"));
+      temporaryDirectories.push(root);
+
+      const codexHome = path.join(root, "codex-home");
+      const config = loadConfig({
+        NODE_ENV: "test",
+        CODEX_HOME: codexHome,
+        ARK_API_KEY: "live-ark-key",
+        ARK_MODEL: "ep-test-model",
+      });
+
+      const agentHome = await SecretBroker.ensureAgentCodexHome("agent-proxy", config, {
+        baseUrl: "http://host.docker.internal:3000/ark-proxy",
+        envKey: "LAUNCHPAD_RUN_TOKEN",
+      });
+      const content = await readFile(path.join(agentHome, "config.toml"), "utf8");
+
+      expect(content).toContain(
+        'base_url = "http://host.docker.internal:3000/ark-proxy"',
+      );
+      expect(content).toContain('env_key = "LAUNCHPAD_RUN_TOKEN"');
+      expect(content).not.toContain("ARK_API_KEY");
+      expect(content).not.toContain("volces.com");
+      expect(content).not.toContain("live-ark-key");
+    });
+
+    it("keeps the direct Ark endpoint for local process runs", async () => {
+      const root = await mkdtemp(path.join(tmpdir(), "launchpad-direct-toml-"));
+      temporaryDirectories.push(root);
+
+      const codexHome = path.join(root, "codex-home");
+      const config = loadConfig({
+        NODE_ENV: "test",
+        CODEX_HOME: codexHome,
+        ARK_API_KEY: "live-ark-key",
+        ARK_MODEL: "ep-test-model",
+      });
+
+      const agentHome = await SecretBroker.ensureAgentCodexHome("agent-local", config);
+      const content = await readFile(path.join(agentHome, "config.toml"), "utf8");
+
+      expect(content).toContain('base_url = "' + config.arkBaseUrl + '"');
+      expect(content).toContain('env_key = "ARK_API_KEY"');
+    });
+
     it("guarantees isolation between multiple agents", async () => {
       const root = await mkdtemp(path.join(tmpdir(), "launchpad-multi-test-"));
       temporaryDirectories.push(root);

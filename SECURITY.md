@@ -17,7 +17,12 @@ credentials, personal data, or exploit details in an issue.
 - Ordinary local containers, not hardened multi-tenant sandboxes
 - Broad outbound network access
 - Prompt-triggered command and file execution
-- Ark key available to the server and active Runtime container
+- Ark key always available to the server process. In `local-process` mode (the
+  default) it is also in the Codex child environment; in `container` mode the
+  Runtime container receives only a short-lived, single-run proxy token
+- Credential proxy at `/ark-proxy` authenticates with run tokens, not
+  `APP_AUTH_TOKEN`; a token captured while its run is active can spend Ark quota
+- Proxy forwards any path under `ARK_BASE_URL`, not just the model endpoint
 - Ark key stored in Terraform POC state
 
 ## Safe use

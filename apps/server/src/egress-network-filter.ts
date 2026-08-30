@@ -1,4 +1,5 @@
 import type { AppConfig } from "./config.js";
+import { HOST_GATEWAY_ALIAS } from "./credential-proxy.js";
 
 export type EgressNetworkMode = "none" | "restricted" | "bridge";
 
@@ -313,6 +314,10 @@ export class EgressNetworkFilter {
 
   /**
    * Generates container networking flags based on the configured egress mode.
+   *
+   * Networked modes publish a host gateway alias so the Runtime container can
+   * reach the backend credential proxy; in 'none' mode the container is
+   * air-gapped and cannot reach the proxy or Ark at all.
    */
   static buildContainerNetworkArgs(config: AppConfig): string[] {
     const mode = config.egressNetworkMode || "restricted";
@@ -321,7 +326,12 @@ export class EgressNetworkFilter {
       return ["--network", "none"];
     }
 
-    return ["--network", "bridge"];
+    return [
+      "--network",
+      "bridge",
+      "--add-host",
+      HOST_GATEWAY_ALIAS + ":host-gateway",
+    ];
   }
 
   /**

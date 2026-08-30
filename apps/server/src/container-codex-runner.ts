@@ -1,7 +1,18 @@
-import { execFile, spawn, type ChildProcess } from "node:child_process";
+import {
+  execFile,
+  spawn,
+  type ChildProcess,
+  type ChildProcessByStdio,
+} from "node:child_process";
+import type { Readable } from "node:stream";
 import { promisify } from "node:util";
 import type { AppConfig } from "./config.js";
 import { buildCodexArgs, parseCodexEventLine } from "./codex-runner.js";
+import {
+  containerProxyBaseUrl,
+  RUN_TOKEN_ENV_KEY,
+  type RunTokenRegistry,
+} from "./credential-proxy.js";
 import { EgressNetworkFilter } from "./egress-network-filter.js";
 import { RunCancelledError } from "./errors.js";
 import { SecretBroker } from "./secret-broker.js";
@@ -70,8 +81,12 @@ export function buildContainerRunArgs(
     String(config.containerPidsLimit),
     "--user",
     config.containerUser,
+    // Value-less --env: the run token is inherited from the engine client's
+    // sanitized environment, so it never appears in argv or `ps` output. The
+    // Ark key is not passed at all - the container reaches Ark only through
+    // the backend credential proxy.
     "--env",
-    "ARK_API_KEY",
+    RUN_TOKEN_ENV_KEY,
     "--env",
     "CODEX_HOME=/codex-home",
     "--env",
@@ -93,7 +108,10 @@ export function buildContainerRunArgs(
 export class ContainerCodexRunner implements AgentRunner {
   private readonly active = new Map<string, ActiveContainer>();
 
-  constructor(private readonly config: AppConfig) {}
+  constructor(
+    private readonly config: AppConfig,
+    private readonly runTokens: RunTokenRegistry,
+  ) {}
 
   async isAvailable(): Promise<boolean> {
     try {
@@ -144,19 +162,30 @@ export class ContainerCodexRunner implements AgentRunner {
       throw new Error("Agent already has an active Runtime container");
     }
 
-    const agentCodexHome = await SecretBroker.ensureAgentCodexHome(
-      request.agentId,
-      this.config,
-    );
-    const child = spawn(
-      this.config.containerEngine,
-      buildContainerRunArgs(request, this.config, agentCodexHome),
-      {
-        cwd: request.workspacePath,
-        env: this.childEnvironment(),
-        stdio: ["ignore", "pipe", "pipe"],
-      },
-    );
+    const runToken = this.runTokens.issue(request.agentId, this.config.codexTimeoutMs);
+    let child: ChildProcessByStdio<null, Readable, Readable>;
+    try {
+      const agentCodexHome = await SecretBroker.ensureAgentCodexHome(
+        request.agentId,
+        this.config,
+        {
+          baseUrl: containerProxyBaseUrl(this.config),
+          envKey: RUN_TOKEN_ENV_KEY,
+        },
+      );
+      child = spawn(
+        this.config.containerEngine,
+        buildContainerRunArgs(request, this.config, agentCodexHome),
+        {
+          cwd: request.workspacePath,
+          env: this.childEnvironment(runToken),
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+    } catch (error) {
+      this.runTokens.revoke(runToken);
+      throw error;
+    }
     const settled = new Promise<void>((resolve) => {
       child.once("close", () => resolve());
       child.once("error", () => resolve());
@@ -237,14 +266,20 @@ export class ContainerCodexRunner implements AgentRunner {
       return { output, threadId: parsed.threadId, usage: parsed.usage };
     } finally {
       clearTimeout(timeout);
+      this.runTokens.revoke(runToken);
       this.active.delete(request.agentId);
     }
   }
 
-  private childEnvironment(): NodeJS.ProcessEnv {
+  /**
+   * Environment for the container engine client. Carries the per-run token when
+   * one is supplied, so `--env RUN_TOKEN_ENV_KEY` can forward it by name. The
+   * Ark key is never placed here: it stays in this process behind the proxy.
+   */
+  private childEnvironment(runToken?: string): NodeJS.ProcessEnv {
     return SecretBroker.sanitizeEnvironment(process.env, {
       overrides: {
-        ARK_API_KEY: this.config.arkApiKey,
+        ...(runToken ? { [RUN_TOKEN_ENV_KEY]: runToken } : {}),
         NO_COLOR: "1",
       },
     });
