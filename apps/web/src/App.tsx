@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, ApiError, setAuthToken } from "./api";
+import { api, ApiError, clearAuthToken, getAuthToken, onUnauthorized, setAuthToken } from "./api";
 import type { Agent, AgentRun, Message, SystemInfo } from "./types";
 
 const starterPrompts = [
@@ -49,6 +49,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [authRequired, setAuthRequired] = useState<boolean | null>(null);
   const [authInput, setAuthInput] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const messageEnd = useRef<HTMLDivElement>(null);
   const selectedIdRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
@@ -83,16 +84,46 @@ export default function App() {
 
   useEffect(() => {
     mountedRef.current = true;
+    const unsubscribeUnauthorized = onUnauthorized(() => {
+      if (!mountedRef.current) return;
+      setAuthRequired(true);
+      setAgents([]);
+      setMessages([]);
+      setSelectedId(null);
+      setActiveRun(null);
+      setError("Session expired or invalid access token.");
+    });
+
     void api
       .auth()
       .then(async ({ required }) => {
         if (!mountedRef.current) return;
-        setAuthRequired(required);
-        if (!required) await bootstrap();
+        if (!required) {
+          setAuthRequired(false);
+          await bootstrap();
+        } else {
+          const cachedToken = getAuthToken();
+          if (cachedToken) {
+            try {
+              await bootstrap();
+              if (mountedRef.current) {
+                setAuthRequired(false);
+              }
+              return;
+            } catch {
+              clearAuthToken();
+            }
+          }
+          if (mountedRef.current) {
+            setAuthRequired(true);
+          }
+        }
       })
       .catch((reason) => setError(reason instanceof Error ? reason.message : String(reason)));
+
     return () => {
       mountedRef.current = false;
+      unsubscribeUnauthorized();
     };
   }, [bootstrap]);
 
@@ -245,6 +276,17 @@ export default function App() {
     }
   };
 
+  const logout = () => {
+    clearAuthToken();
+    setAuthRequired(true);
+    setAgents([]);
+    setMessages([]);
+    setSelectedId(null);
+    setActiveRun(null);
+    setError(null);
+    setAuthInput("");
+  };
+
   const unlock = async (event: React.FormEvent) => {
     event.preventDefault();
     setBusy(true);
@@ -289,14 +331,42 @@ export default function App() {
           {error && <div className="error-banner" role="alert">{error}</div>}
           <label>
             Access token
-            <input
-              autoFocus
-              type="password"
-              value={authInput}
-              onChange={(event) => setAuthInput(event.target.value)}
-              autoComplete="current-password"
-              required
-            />
+            <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+              <input
+                autoFocus
+                type={showPassword ? "text" : "password"}
+                value={authInput}
+                onChange={(event) => setAuthInput(event.target.value)}
+                autoComplete="current-password"
+                required
+                style={{ paddingRight: "56px" }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((prev) => !prev)}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                style={{
+                  position: "absolute",
+                  right: "8px",
+                  width: "auto",
+                  minHeight: "26px",
+                  height: "26px",
+                  padding: "0 8px",
+                  fontSize: "11px",
+                  fontWeight: 600,
+                  background: "#f0efea",
+                  color: "#464741",
+                  border: "1px solid #e4e2da",
+                  borderRadius: "6px",
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                {showPassword ? "Hide" : "Show"}
+              </button>
+            </div>
           </label>
           <button className="button button-primary" disabled={busy || !authInput.trim()}>
             {busy ? <Spinner /> : "Open Launchpad"}
@@ -359,7 +429,20 @@ export default function App() {
         </nav>
 
         <div className="runtime-card">
-          <span className="eyebrow">Runtime</span>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span className="eyebrow">Runtime</span>
+            {getAuthToken() && (
+              <button
+                type="button"
+                className="button button-ghost"
+                onClick={logout}
+                style={{ padding: "0.2rem 0.5rem", fontSize: "0.75rem" }}
+                title="Clear stored session and lock"
+              >
+                Lock
+              </button>
+            )}
+          </div>
           <strong>{system?.runtime ?? "Checking…"}</strong>
           <span>
             {system?.arkModel ?? "Ark model not configured"}

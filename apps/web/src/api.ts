@@ -9,25 +9,77 @@ export class ApiError extends Error {
   }
 }
 
+const AUTH_STORAGE_KEY = "launchpad_auth_token";
+
 let authToken = "";
+try {
+  if (typeof window !== "undefined" && window.sessionStorage) {
+    authToken = window.sessionStorage.getItem(AUTH_STORAGE_KEY) ?? "";
+  }
+} catch {
+  // Ignore sessionStorage access exceptions
+}
+
+let unauthorizedListeners: Array<() => void> = [];
+
+export function onUnauthorized(callback: () => void): () => void {
+  unauthorizedListeners.push(callback);
+  return () => {
+    unauthorizedListeners = unauthorizedListeners.filter((cb) => cb !== callback);
+  };
+}
+
+export function getAuthToken(): string {
+  return authToken;
+}
 
 export function setAuthToken(token: string): void {
   authToken = token.trim();
+  try {
+    if (typeof window !== "undefined" && window.sessionStorage) {
+      if (authToken) {
+        window.sessionStorage.setItem(AUTH_STORAGE_KEY, authToken);
+      } else {
+        window.sessionStorage.removeItem(AUTH_STORAGE_KEY);
+      }
+    }
+  } catch {
+    // Ignore sessionStorage write exceptions
+  }
+}
+
+export function clearAuthToken(): void {
+  setAuthToken("");
 }
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const headers = {
     ...(options?.body ? { "Content-Type": "application/json" } : {}),
     ...(authToken ? { Authorization: "Bearer " + authToken } : {}),
+    "X-Launchpad-Client": "web",
     ...options?.headers,
   };
   const response = await fetch(url, {
     ...options,
     headers,
   });
-  const data = (await response.json().catch(() => ({}))) as T & { error?: string };
+  const data = (await response.json().catch(() => ({}))) as T & { error?: string; message?: string };
   if (!response.ok) {
-    throw new ApiError(data.error ?? "Request failed", response.status);
+    if (response.status === 401) {
+      clearAuthToken();
+      for (const listener of unauthorizedListeners) {
+        try {
+          listener();
+        } catch {
+          // Ignore listener errors
+        }
+      }
+    }
+    const errorMessage =
+      (typeof data.message === "string" && data.message ? data.message : undefined) ||
+      data.error ||
+      "Request failed";
+    throw new ApiError(errorMessage, response.status);
   }
   return data;
 }

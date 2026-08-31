@@ -48,6 +48,14 @@ export class AgentService {
         }
       }
     });
+
+    for (const agent of this.store.snapshot().agents) {
+      try {
+        await this.workspaces.writeInstructions(agent);
+      } catch {
+        // Ignore if workspace not yet initialized
+      }
+    }
   }
 
   listAgents(): Agent[] {
