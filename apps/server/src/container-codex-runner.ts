@@ -30,6 +30,7 @@ interface ParsedEvents {
   threadId: string | null;
   usage: RunUsage | null;
   errors: string[];
+  shellToolUsed: boolean;
 }
 
 export function containerName(agentId: string, instanceId = "default"): string {
@@ -190,6 +191,7 @@ export class ContainerCodexRunner implements AgentRunner {
       threadId: request.threadId,
       usage: null,
       errors: [],
+      shellToolUsed: false,
     };
     let stdout = "";
     let stderr = "";
@@ -247,7 +249,12 @@ export class ContainerCodexRunner implements AgentRunner {
       }
       const output = parsed.messages.at(-1)?.trim();
       if (!output) throw new Error("Codex completed without an agent message");
-      return { output, threadId: parsed.threadId, usage: parsed.usage };
+      return {
+        output,
+        threadId: parsed.threadId,
+        usage: parsed.usage,
+        shellToolUsed: parsed.shellToolUsed,
+      };
     } finally {
       clearTimeout(timeout);
       SecretBroker.revokeAgentSession(request.agentId);

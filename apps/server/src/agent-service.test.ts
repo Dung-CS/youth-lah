@@ -199,4 +199,55 @@ describe("Agent lifecycle", () => {
     expect(assistantMessage?.content).toContain("[REDACTED:OPENAI_API_KEY]");
     expect(assistantMessage?.content).toContain("[REDACTED:EMAIL]");
   });
+
+  it("fails an explicit shell request when the runner returns no shell tool usage", async () => {
+    const service = await makeService({
+      run: async (request) => ({
+        output: "The current directory is probably the workspace root.",
+        threadId: request.threadId ?? "fake-thread",
+        usage: null,
+        shellToolUsed: false,
+      }),
+      cancel: async () => false,
+      isAvailable: async () => true,
+    });
+    const agent = await service.createAgent({ name: "ShellRequired" });
+    const { run } = await service.sendMessage(
+      agent.id,
+      'execute the shell command "pwd" and tell me what it returns',
+    );
+
+    await expect.poll(() => service.getRun(run.id).status).toBe("failed");
+    const failedRun = service.getRun(run.id);
+    expect(failedRun.errorCode).toBe("SHELL_TOOL_REQUIRED_BUT_NOT_USED");
+    expect(failedRun.error).toContain("required shell execution");
+    expect(service.getAgent(agent.id).status).toBe("error");
+  });
+
+  it("allows an explicit shell request when the runner confirms shell tool usage", async () => {
+    const captured: RunnerRequest[] = [];
+    const service = await makeService({
+      run: async (request) => {
+        captured.push(request);
+        return {
+          output: "/tmp/workspace",
+          threadId: request.threadId ?? "fake-thread",
+          usage: null,
+          shellToolUsed: true,
+        };
+      },
+      cancel: async () => false,
+      isAvailable: async () => true,
+    });
+    const agent = await service.createAgent({ name: "ShellConfirmed" });
+    const { run } = await service.sendMessage(
+      agent.id,
+      'execute the shell command "pwd" and tell me what it returns',
+    );
+
+    await expect.poll(() => service.getRun(run.id).status).toBe("completed");
+    expect(captured).toHaveLength(1);
+    expect(captured[0]?.requiresShellExecution).toBe(true);
+    expect(captured[0]?.prompt).toContain("must use the shell tool");
+  });
 });

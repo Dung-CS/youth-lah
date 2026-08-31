@@ -18,6 +18,29 @@ export interface ParsedEvents {
   threadId: string | null;
   usage: RunUsage | null;
   errors: string[];
+  shellToolUsed: boolean;
+}
+
+function extractToolName(item: Record<string, unknown>): string | null {
+  if (typeof item.name === "string") return item.name;
+  if (item.function && typeof item.function === "object") {
+    const fn = item.function as Record<string, unknown>;
+    if (typeof fn.name === "string") return fn.name;
+  }
+  if (item.tool && typeof item.tool === "object") {
+    const tool = item.tool as Record<string, unknown>;
+    if (typeof tool.name === "string") return tool.name;
+  }
+  return null;
+}
+
+function isShellToolItem(item: Record<string, unknown>): boolean {
+  const type = typeof item.type === "string" ? item.type.toLowerCase() : "";
+  const name = extractToolName(item)?.toLowerCase() ?? "";
+  if (name === "bash" || name === "shell" || name === "sh" || name === "zsh") {
+    return true;
+  }
+  return type.includes("function") && name === "bash";
 }
 
 export function buildCodexArgs(
@@ -56,6 +79,9 @@ export function parseCodexEventLine(line: string, parsed: ParsedEvents): void {
 
   if (event.type === "item.completed" && event.item && typeof event.item === "object") {
     const item = event.item as Record<string, unknown>;
+    if (isShellToolItem(item)) {
+      parsed.shellToolUsed = true;
+    }
     if (item.type === "agent_message" && typeof item.text === "string") {
       parsed.messages.push(item.text);
     }
@@ -161,6 +187,7 @@ export class CodexRunner implements AgentRunner {
       threadId: request.threadId,
       usage: null,
       errors: [],
+      shellToolUsed: false,
     };
     let stdout = "";
     let stderr = "";
@@ -226,6 +253,7 @@ export class CodexRunner implements AgentRunner {
         output,
         threadId: parsed.threadId,
         usage: parsed.usage,
+        shellToolUsed: parsed.shellToolUsed,
       };
     } finally {
       clearTimeout(timeout);

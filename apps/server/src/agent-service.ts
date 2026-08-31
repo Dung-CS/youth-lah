@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { AppConfig } from "./config.js";
 import { isArkConfigured } from "./config.js";
-import { HttpError, RunCancelledError } from "./errors.js";
+import { HttpError, RequiredToolNotUsedError, RunCancelledError } from "./errors.js";
 import { ErrorSanitizer } from "./error-sanitizer.js";
 import { InboundGuard } from "./inbound-guard.js";
 import { OutboundDlpRedactor } from "./outbound-dlp.js";
@@ -18,6 +18,34 @@ import type {
 import { WorkspaceManager } from "./workspace.js";
 
 const now = () => new Date().toISOString();
+
+const EXPLICIT_SHELL_PATTERNS = [
+  /\b(?:run|execute|invoke)\b[\s\S]{0,120}\b(?:shell|bash|sh|zsh)\b/i,
+  /\b(?:run|execute)\b[\s\S]{0,80}\bcommand\b/i,
+  /\b(?:what does|tell me what)\b[\s\S]{0,80}\breturn[s]?\b/i,
+  /`[^`\n]+`/,
+  /"[^"\n]+"/,
+];
+
+function requiresShellExecution(prompt: string): boolean {
+  const normalized = prompt.trim();
+  if (!normalized) return false;
+  if (!/\b(?:run|execute|command|shell|bash|sh|zsh|return)\b/i.test(normalized)) {
+    return false;
+  }
+  return EXPLICIT_SHELL_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+function buildExecutionPrompt(prompt: string, requireShell: boolean): string {
+  if (!requireShell) return prompt;
+  return [
+    prompt,
+    "",
+    "Execution requirement: you must use the shell tool to run the requested command before answering.",
+    "If the command fails, report the command, stderr, and exit status instead of answering from memory.",
+    "Do not answer this request without actually invoking the shell tool.",
+  ].join("\n");
+}
 
 export class AgentService {
   private readonly activeExecutions = new Map<string, Promise<void>>();
@@ -172,6 +200,7 @@ export class AgentService {
     prompt: string,
   ): Promise<{ run: AgentRun; message: Message }> {
     const sanitizedPrompt = InboundGuard.validateOrThrow(prompt);
+    const shellRequired = requiresShellExecution(sanitizedPrompt);
     if (!isArkConfigured(this.config)) {
       throw new HttpError(
         503,
@@ -187,6 +216,7 @@ export class AgentService {
       prompt: sanitizedPrompt,
       output: null,
       error: null,
+      errorCode: null,
       usage: null,
       startedAt: null,
       completedAt: null,
@@ -219,7 +249,7 @@ export class AgentService {
       storedAgent.updatedAt = timestamp;
       return snapshot;
     });
-    const execution = this.executeRun(agentAtStart, run);
+    const execution = this.executeRun(agentAtStart, run, shellRequired);
     this.activeExecutions.set(agentId, execution);
     void execution
       .finally(() => {
@@ -250,7 +280,11 @@ export class AgentService {
     };
   }
 
-  private async executeRun(agentAtStart: Agent, run: AgentRun): Promise<void> {
+  private async executeRun(
+    agentAtStart: Agent,
+    run: AgentRun,
+    shellRequired: boolean,
+  ): Promise<void> {
     await this.store.mutate((database) => {
       const storedRun = database.runs.find((item) => item.id === run.id);
       if (storedRun) {
@@ -265,9 +299,13 @@ export class AgentService {
       const result = await this.runner.run({
         agentId: agentAtStart.id,
         workspacePath: agentAtStart.workspacePath,
-        prompt: run.prompt,
+        prompt: buildExecutionPrompt(run.prompt, shellRequired),
         threadId: agentAtStart.codexThreadId,
+        requiresShellExecution: shellRequired,
       });
+      if (shellRequired && !result.shellToolUsed) {
+        throw new RequiredToolNotUsedError();
+      }
       const redactedOutput = OutboundDlpRedactor.redact(result.output, {
         config: this.config,
       }).redactedText;
@@ -279,6 +317,7 @@ export class AgentService {
         if (!storedRun || !agent) return;
         storedRun.status = "completed";
         storedRun.output = sanitizedOutput;
+        storedRun.errorCode = null;
         storedRun.usage = result.usage;
         storedRun.completedAt = completedAt;
         database.messages.push({
@@ -298,6 +337,8 @@ export class AgentService {
       const completedAt = now();
       const cancelled = error instanceof RunCancelledError;
       const rawMessage = error instanceof Error ? error.message : String(error);
+      const errorCode =
+        error instanceof RequiredToolNotUsedError ? error.code : null;
       const redactedError = OutboundDlpRedactor.redact(rawMessage, {
         config: this.config,
       }).redactedText;
@@ -308,6 +349,7 @@ export class AgentService {
         if (storedRun) {
           storedRun.status = cancelled ? "cancelled" : "failed";
           storedRun.error = sanitizedError;
+          storedRun.errorCode = errorCode;
           storedRun.completedAt = completedAt;
         }
         if (agent) {

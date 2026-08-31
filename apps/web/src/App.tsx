@@ -13,6 +13,21 @@ const starterPrompts = [
   "Build a responsive single-page todo app with tests.",
 ];
 
+function formatRunError(run: AgentRun): { title: string; detail: string | null } {
+  if (run.errorCode === "SHELL_TOOL_REQUIRED_BUT_NOT_USED") {
+    return {
+      title: "Shell tool was required",
+      detail:
+        run.error ??
+        "This request asked the agent to execute a shell command, but the model replied without using the shell tool.",
+    };
+  }
+  return {
+    title: "Run failed",
+    detail: run.error,
+  };
+}
+
 const emptyForm = {
   name: "",
   description: "",
@@ -669,8 +684,8 @@ export default function App() {
                 )}
                 {activeRun?.status === "failed" && (
                   <article className="run-error">
-                    <strong>Run failed</strong>
-                    <span>{activeRun.error}</span>
+                    <strong>{formatRunError(activeRun).title}</strong>
+                    <span>{formatRunError(activeRun).detail}</span>
                   </article>
                 )}
                 <div ref={messageEnd} />

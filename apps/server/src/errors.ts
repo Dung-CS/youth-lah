@@ -15,6 +15,17 @@ export class RunCancelledError extends Error {
   }
 }
 
+export class RequiredToolNotUsedError extends Error {
+  readonly code = "SHELL_TOOL_REQUIRED_BUT_NOT_USED";
+
+  constructor() {
+    super(
+      "This request explicitly required shell execution, but the agent responded without using the shell tool.",
+    );
+    this.name = "RequiredToolNotUsedError";
+  }
+}
+
 export class SecurityViolationError extends HttpError {
   constructor(
     message: string,

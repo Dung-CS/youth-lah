@@ -63,42 +63,46 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
     ...options,
     headers,
   });
-const data = (await response.json().catch(() => ({}))) as T & {error?: string;message?: string; retryAfterMs?: number;};
-if (!response.ok) {
-  if (response.status === 401) {
-    clearAuthToken();
-    for (const listener of unauthorizedListeners) {
-      try {
-        listener();
-      } catch {
-        // Ignore listener errors
+  const data = (await response.json().catch(() => ({}))) as T & {
+    error?: string;
+    message?: string;
+    retryAfterMs?: number;
+  };
+  if (!response.ok) {
+    if (response.status === 401) {
+      clearAuthToken();
+      for (const listener of unauthorizedListeners) {
+        try {
+          listener();
+        } catch {
+          // Ignore listener errors
+        }
       }
-    }}
+    }
 
-  if (response.status === 429) {
-    const seconds =
-      typeof data.retryAfterMs === "number"
-        ? Math.ceil(data.retryAfterMs / 1000)
-        : undefined;
+    if (response.status === 429) {
+      const seconds =
+        typeof data.retryAfterMs === "number"
+          ? Math.ceil(data.retryAfterMs / 1000)
+          : undefined;
 
-    throw new ApiError(
-      seconds
-        ? `Rate limit reached. Try again in ${seconds} seconds.`
-        : "Rate limit reached. Please try again shortly.",
-      response.status
-    );
+      throw new ApiError(
+        seconds
+          ? `Rate limit reached. Try again in ${seconds} seconds.`
+          : "Rate limit reached. Please try again shortly.",
+        response.status,
+      );
+    }
+
+    const errorMessage =
+      (typeof data.message === "string" && data.message
+        ? data.message
+        : undefined) ||
+      data.error ||
+      "Request failed";
+
+    throw new ApiError(errorMessage, response.status);
   }
-
-  // Keep the normal error handling
-  const errorMessage =
-    (typeof data.message === "string" && data.message
-      ? data.message
-      : undefined) ||
-    data.error ||
-    "Request failed";
-
-  throw new ApiError(errorMessage, response.status);
-}
 
   return data;
 }

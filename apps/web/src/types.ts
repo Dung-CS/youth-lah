@@ -30,6 +30,7 @@ export interface AgentRun {
   prompt: string;
   output: string | null;
   error: string | null;
+  errorCode?: string | null;
   usage: {
     inputTokens?: number;
     cachedInputTokens?: number;

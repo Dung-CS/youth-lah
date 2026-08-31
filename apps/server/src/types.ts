@@ -37,6 +37,7 @@ export interface AgentRun {
   prompt: string;
   output: string | null;
   error: string | null;
+  errorCode?: string | null;
   usage: RunUsage | null;
   startedAt: string | null;
   completedAt: string | null;
@@ -66,6 +67,7 @@ export interface RunnerResult {
   output: string;
   threadId: string | null;
   usage: RunUsage | null;
+  shellToolUsed?: boolean;
 }
 
 export interface RunnerRequest {
@@ -73,6 +75,7 @@ export interface RunnerRequest {
   workspacePath: string;
   prompt: string;
   threadId: string | null;
+  requiresShellExecution?: boolean;
 }
 
 export interface AgentRunner {

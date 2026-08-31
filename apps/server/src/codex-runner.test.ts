@@ -47,6 +47,7 @@ describe("Codex runner protocol", () => {
         outputTokens?: number;
       } | null,
       errors: [] as string[],
+      shellToolUsed: false,
     };
     parseCodexEventLine(
       JSON.stringify({ type: "thread.started", thread_id: "thread-123" }),
@@ -69,5 +70,29 @@ describe("Codex runner protocol", () => {
     expect(parsed.threadId).toBe("thread-123");
     expect(parsed.messages).toEqual(["Done."]);
     expect(parsed.usage).toEqual({ inputTokens: 10, outputTokens: 4 });
+  });
+
+  it("marks bash tool usage when Codex completes a shell tool call", () => {
+    const parsed = {
+      messages: [] as string[],
+      threadId: null as string | null,
+      usage: null as {
+        inputTokens?: number;
+        cachedInputTokens?: number;
+        outputTokens?: number;
+      } | null,
+      errors: [] as string[],
+      shellToolUsed: false,
+    };
+
+    parseCodexEventLine(
+      JSON.stringify({
+        type: "item.completed",
+        item: { type: "function_call", name: "bash", arguments: "{\"command\":\"pwd\"}" },
+      }),
+      parsed,
+    );
+
+    expect(parsed.shellToolUsed).toBe(true);
   });
 });
