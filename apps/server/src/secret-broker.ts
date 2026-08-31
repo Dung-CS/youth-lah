@@ -189,6 +189,7 @@ export class SecretBroker {
       "# Isolated Codex configuration for agent " + agentId,
       "model = " + JSON.stringify(config.arkModel || "ep-not-configured"),
       'model_provider = "volcengine_ark"',
+      'web_search = "disabled"',
       "",
       "[model_providers.volcengine_ark]",
       'name = "Volcengine Ark"',

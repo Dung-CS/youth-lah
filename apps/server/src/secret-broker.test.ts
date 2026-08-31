@@ -158,6 +158,7 @@ describe("SecretBroker", () => {
       const configFile = path.join(agentHome, "config.toml");
       const content = await readFile(configFile, "utf8");
       expect(content).toContain('model = "ep-test-model"');
+      expect(content).toContain('web_search = "disabled"');
       expect(content).toContain('name = "Volcengine Ark"');
       expect(content).toContain('env_key = "AGENT_SESSION_TOKEN"');
       expect(content).toContain("/api/internal/llm-proxy/agent-alpha-1");
@@ -231,4 +232,3 @@ describe("SecretBroker", () => {
     });
   });
 });
-
