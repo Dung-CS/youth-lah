@@ -254,21 +254,17 @@ export default function App() {
   const sendMessage = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!selected || !prompt.trim()) return;
-    const content = prompt.trim();
-    setPrompt("");
-    setError(null);
-    try {
-      const result = await api.sendMessage(selected.id, content);
-      if (selectedIdRef.current === selected.id) {
-        setMessages((current) => [...current, result.message]);
-        setActiveRun(result.run);
-      }
-      setAgents((current) =>
-        current.map((agent) =>
-          agent.id === selected.id ? { ...agent, status: "busy" } : agent,
-        ),
-      );
-      await pollRun(result.run.id, selected.id);
+const content = prompt.trim();
+setError(null);
+try {const result =await api.sendMessage(selected.id,content);
+  setPrompt("");
+  if (selectedIdRef.current === selected.id) {
+    setMessages((current) => [
+      ...current,
+      result.message,
+    ]);
+    setActiveRun(result.run);
+  }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
       setActiveRun(null);

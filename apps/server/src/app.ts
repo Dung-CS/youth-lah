@@ -12,6 +12,8 @@ import { registerSecurityHeaders } from "./security-headers.js";
 import { registerCsrfGuard } from "./csrf-guard.js";
 import { registerLlmProxy } from "./llm-proxy.js";
 import type { AgentService } from "./agent-service.js";
+import { consumeRateLimit } from "./rate-limit.js";
+
 
 const agentIdParams = z.object({ id: z.string().uuid() });
 const runIdParams = z.object({ id: z.string().uuid() });
@@ -128,13 +130,26 @@ export async function createApp(
     const { id } = agentIdParams.parse(request.params);
     return { runs: service.getRuns(id) };
   });
-
-  app.post("/api/agents/:id/messages", async (request, reply) => {
+ 
+  app.post("/api/agents/:id/messages",async (request, reply) => {
     const { id } = agentIdParams.parse(request.params);
     const body = messageBody.parse(request.body);
-    const result = await service.sendMessage(id, body.content);
+    const rate = consumeRateLimit(`agent:${id}`,3,60_000);
+    if (!rate.allowed) {reply.header("Retry-After",Math.ceil(rate.retryAfterMs / 1000));
+      return reply.code(429).send({
+        error: "RATE_LIMIT_EXCEEDED",
+        message:
+          "Too many messages. Please wait before trying again.",
+        retryAfterMs: rate.retryAfterMs,
+      });
+    }
+    const result = await service.sendMessage(
+      id,
+      body.content
+    );
     return reply.code(202).send(result);
-  });
+  }
+);
 
   app.get("/api/runs/:id", async (request) => {
     const { id } = runIdParams.parse(request.params);
