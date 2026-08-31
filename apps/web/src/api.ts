@@ -25,10 +25,27 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
     ...options,
     headers,
   });
-  const data = (await response.json().catch(() => ({}))) as T & { error?: string };
-  if (!response.ok) {
-    throw new ApiError(data.error ?? "Request failed", response.status);
+const data = (await response.json().catch(() => ({}))) as T & {error?: string; message?: string; retryAfterMs?: number;};
+if (!response.ok) {
+  if (response.status === 429) {
+    const seconds =
+      typeof data.retryAfterMs === "number"
+        ? Math.ceil(data.retryAfterMs / 1000)
+        : undefined;
+    throw new ApiError(
+      seconds
+        ? `Rate limit reached. Try again in ${seconds} seconds.`
+        : "Rate limit reached. Please try again shortly.",
+      response.status
+    );
   }
+  throw new ApiError(
+    data.message ??
+      data.error ??
+      "Request failed",
+    response.status
+  );
+}
   return data;
 }
 
