@@ -51,12 +51,24 @@ export class ContainerSecurityGuard {
       violations.push("Container missing mandatory '--read-only' root filesystem flag");
     }
 
-    // 5. Verify Read-Only Configuration Mount for codex-home
-    const codexHomeMount = args.find(
+    // 5. Verify Read-Only Configuration Mount for the agent's codex config.
+    // /codex-home itself must stay writable — Codex writes session rollouts, history
+    // and its state database there — so the immutability guarantee is anchored on
+    // config.toml, which pins the model provider and the host LLM proxy endpoint.
+    const codexHomeMounts = args.filter(
       (arg) => arg.includes("dst=/codex-home") || arg.includes("destination=/codex-home"),
     );
-    if (codexHomeMount && !codexHomeMount.includes("readonly") && !codexHomeMount.includes("ro")) {
-      violations.push("Container configuration mount for '/codex-home' must be read-only (readonly)");
+    if (codexHomeMounts.length > 0) {
+      const hasReadOnlyConfig = codexHomeMounts.some(
+        (arg) =>
+          /(?:dst|destination)=\/codex-home\/config\.toml(?:,|$)/.test(arg) &&
+          /(?:^|,)(?:readonly|ro)(?:=true)?(?:,|$)/.test(arg),
+      );
+      if (!hasReadOnlyConfig) {
+        violations.push(
+          "Container must mount '/codex-home/config.toml' read-only (readonly) to prevent agent tampering with model provider configuration",
+        );
+      }
     }
 
     // 6. Verify Resource Bounds (CPU, Memory, and PIDs limits)

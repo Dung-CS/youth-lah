@@ -38,6 +38,11 @@ export function containerName(agentId: string, instanceId = "default"): string {
   return "launchpad-" + safeInstance + "-" + safeAgent;
 }
 
+/** Container-side path of an agent's config.toml (always POSIX, never host-joined). */
+function agentCodexConfig(agentCodexHome: string): string {
+  return agentCodexHome.replace(/[\\/]+$/, "") + "/config.toml";
+}
+
 export function buildContainerRunArgs(
   request: RunnerRequest,
   config: AppConfig,
@@ -89,8 +94,14 @@ export function buildContainerRunArgs(
     "NO_COLOR=1",
     "--mount",
     "type=bind,src=" + request.workspacePath + ",dst=/workspace",
+    // Codex persists its rollout recorder output, history and state database under
+    // CODEX_HOME, so the directory itself has to be writable. Integrity is anchored on
+    // config.toml instead: it is re-mounted read-only on top so a compromised agent
+    // cannot repoint model_provider / base_url away from the host LLM proxy.
     "--mount",
-    "type=bind,src=" + agentCodexHome + ",dst=/codex-home,readonly",
+    "type=bind,src=" + agentCodexHome + ",dst=/codex-home",
+    "--mount",
+    "type=bind,src=" + agentCodexConfig(agentCodexHome) + ",dst=/codex-home/config.toml,readonly",
     "--workdir",
     "/workspace",
     config.containerRuntimeImage,
@@ -236,7 +247,7 @@ export class ContainerCodexRunner implements AgentRunner {
         throw new Error("Codex output exceeded CODEX_MAX_OUTPUT_BYTES");
       }
       if (exitCode !== 0) {
-        const detail = parsed.errors.at(-1) ?? stderr.trim() ?? "No error detail";
+        const detail = parsed.errors.at(-1) || stderr.trim() || "No error detail";
         throw new Error(
           this.config.containerEngine +
             " Runtime exited with code " +

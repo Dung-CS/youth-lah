@@ -33,7 +33,10 @@ describe("Container Codex runner", () => {
     );
     expect(args).toContain("runtime:test");
     expect(args).toContain("type=bind,src=/tmp/agent-workspace,dst=/workspace");
-    expect(args).toContain("type=bind,src=/tmp/codex-home,dst=/codex-home,readonly");
+    expect(args).toContain("type=bind,src=/tmp/codex-home,dst=/codex-home");
+    expect(args).toContain(
+      "type=bind,src=/tmp/codex-home/config.toml,dst=/codex-home/config.toml,readonly",
+    );
     expect(args).toContain("501:20");
     expect(args).toContain("workspace-write");
     expect(args).toContain("/workspace");
@@ -86,7 +89,10 @@ describe("Container Codex runner", () => {
       isolatedHome,
     );
     expect(args).toContain(
-      "type=bind,src=/tmp/codex-home/agents/agent-123,dst=/codex-home,readonly",
+      "type=bind,src=/tmp/codex-home/agents/agent-123,dst=/codex-home",
+    );
+    expect(args).toContain(
+      "type=bind,src=/tmp/codex-home/agents/agent-123/config.toml,dst=/codex-home/config.toml,readonly",
     );
   });
 

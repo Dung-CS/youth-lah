@@ -116,7 +116,7 @@ describe("Layer 3: Container Security Guard", () => {
     expect(decision.violations.some((v) => v.includes("--read-only"))).toBe(true);
   });
 
-  it("detects and rejects writable codex-home mount", () => {
+  it("detects and rejects codex-home mounted without a read-only config.toml", () => {
     const dangerousArgs = [
       "run",
       "--rm",
@@ -134,12 +134,23 @@ describe("Layer 3: Container Security Guard", () => {
       "--user",
       "1000:1000",
       "--mount",
-      "type=bind,src=/tmp/home,dst=/codex-home", // missing readonly!
+      "type=bind,src=/tmp/home,dst=/codex-home", // no readonly config.toml overlay!
     ];
 
     const decision = ContainerSecurityGuard.validateContainerRunArgs(dangerousArgs);
     expect(decision.safe).toBe(false);
     expect(decision.violations.some((v) => v.includes("codex-home"))).toBe(true);
+
+    const safeArgs = [
+      ...dangerousArgs,
+      "--mount",
+      "type=bind,src=/tmp/home/config.toml,dst=/codex-home/config.toml,readonly",
+    ];
+    expect(
+      ContainerSecurityGuard.validateContainerRunArgs(safeArgs).violations.some((v) =>
+        v.includes("codex-home"),
+      ),
+    ).toBe(false);
   });
 
   it("detects and rejects root user execution", () => {
