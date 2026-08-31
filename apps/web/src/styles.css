@@ -762,6 +762,16 @@ textarea:focus {
   font-size: 9px;
 }
 
+.message-meta .message-delivery-status {
+  margin-left: auto;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.message-meta .message-delivery-failed {
+  color: var(--red);
+}
+
 .message-body {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -784,6 +794,29 @@ textarea:focus {
   border: 1px solid #ddd6f8;
   border-radius: 13px 4px 13px 13px;
   padding: 11px 13px;
+}
+
+.message-failed .message-body {
+  background: #f8eeee;
+  color: #704444;
+  border-color: #e7c4c1;
+}
+
+.message-inline-error {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 7px 0 0 10px;
+  max-width: calc(100% - 10px);
+  padding: 8px 10px;
+  border-left: 2px solid var(--red);
+  color: #9e4545;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.message-inline-error strong {
+  font-size: 12px;
 }
 
 .message-assistant .message-body {

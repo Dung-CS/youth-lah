@@ -100,6 +100,9 @@ if (!response.ok) {
   throw new ApiError(errorMessage, response.status);
 }
 
+  return data;
+}
+
 export const api = {
   auth: () => request<{ required: boolean }>("/api/auth"),
   system: () => request<SystemInfo>("/api/system"),

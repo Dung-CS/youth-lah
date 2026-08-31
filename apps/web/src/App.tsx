@@ -2,6 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, clearAuthToken, getAuthToken, onUnauthorized, setAuthToken } from "./api";
 import type { Agent, AgentRun, Message, SystemInfo } from "./types";
 
+type ConversationMessage = Message & {
+  deliveryStatus?: "sending" | "failed";
+  deliveryError?: string;
+};
+
 const starterPrompts = [
   "Create a small TypeScript CLI that prints a weather summary from sample JSON.",
   "Inspect this workspace and explain what you would improve first.",
@@ -38,7 +43,7 @@ function Spinner() {
 export default function App() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -254,21 +259,51 @@ export default function App() {
   const sendMessage = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!selected || !prompt.trim()) return;
-const content = prompt.trim();
-setError(null);
-try {const result =await api.sendMessage(selected.id,content);
-  setPrompt("");
-  if (selectedIdRef.current === selected.id) {
-    setMessages((current) => [
-      ...current,
-      result.message,
-    ]);
-    setActiveRun(result.run);
-  }
+
+    const content = prompt.trim();
+    const localMessageId = `local-${crypto.randomUUID()}`;
+    const optimisticMessage: ConversationMessage = {
+      id: localMessageId,
+      agentId: selected.id,
+      runId: localMessageId,
+      role: "user",
+      content,
+      createdAt: new Date().toISOString(),
+      deliveryStatus: "sending",
+    };
+
+    setError(null);
+    setPrompt("");
+    setMessages((current) => [...current, optimisticMessage]);
+
+    try {
+      const result = await api.sendMessage(selected.id, content);
+      if (selectedIdRef.current === selected.id) {
+        setMessages((current) =>
+          current.map((message) =>
+            message.id === localMessageId ? result.message : message,
+          ),
+        );
+        setActiveRun(result.run);
+      }
+      void pollRun(result.run.id, selected.id).catch((reason) => {
+        if (mountedRef.current && selectedIdRef.current === selected.id) {
+          setError(reason instanceof Error ? reason.message : String(reason));
+        }
+      });
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
-      setActiveRun(null);
-      await refreshAgents();
+      const deliveryError = reason instanceof Error ? reason.message : String(reason);
+      if (selectedIdRef.current === selected.id) {
+        setMessages((current) =>
+          current.map((message) =>
+            message.id === localMessageId
+              ? { ...message, deliveryStatus: "failed", deliveryError }
+              : message,
+          ),
+        );
+        setActiveRun(null);
+      }
+      void refreshAgents().catch(() => undefined);
     }
   };
 
@@ -590,12 +625,33 @@ try {const result =await api.sendMessage(selected.id,content);
                   </div>
                 ) : (
                   messages.map((message) => (
-                    <article className={"message message-" + message.role} key={message.id}>
+                    <article
+                      className={
+                        "message message-" +
+                        message.role +
+                        (message.deliveryStatus === "failed" ? " message-failed" : "")
+                      }
+                      key={message.id}
+                    >
                       <div className="message-meta">
                         <strong>{message.role === "user" ? "You" : selected.name}</strong>
                         <span>{formatTime(message.createdAt)}</span>
+                        {message.deliveryStatus === "sending" && (
+                          <span className="message-delivery-status">Sending…</span>
+                        )}
+                        {message.deliveryStatus === "failed" && (
+                          <span className="message-delivery-status message-delivery-failed">
+                            Not sent
+                          </span>
+                        )}
                       </div>
                       <div className="message-body">{message.content}</div>
+                      {message.deliveryStatus === "failed" && message.deliveryError && (
+                        <div className="message-inline-error" role="alert">
+                          <strong>Couldn’t send this message</strong>
+                          <span>{message.deliveryError}</span>
+                        </div>
+                      )}
                     </article>
                   ))
                 )}
