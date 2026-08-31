@@ -45,7 +45,7 @@ export async function createApp(
   registerCsrfGuard(app, config);
 
   // Layer 2 Defenses: Host-Side LLM Secret Broker & Reverse Proxy
-  registerLlmProxy(app, config);
+  await registerLlmProxy(app, config);
 
   await app.register(cors, {
     origin:

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { SecretBroker } from "./secret-broker.js";
+import { resolveUpstreamUrl } from "./llm-proxy.js";
 import type { AgentService } from "./agent-service.js";
 
 const mockService = {
@@ -279,6 +280,156 @@ describe("Layer 2: Host-Side LLM Secret Broker & Reverse Proxy", () => {
     expect(Array.isArray(parsedBody.input)).toBe(true);
     expect(parsedBody.tools[0].external_web_access).toBeUndefined();
     expect(res.json().id).toBe("resp-789");
+  });
+
+  it("never forwards upstream when the request path escapes the proxy prefix", async () => {
+    const sessionToken = SecretBroker.issueAgentSession(agentId);
+    const config = loadConfig({
+      NODE_ENV: "development",
+      HOST: "127.0.0.1",
+      ARK_API_KEY: "ark-real-secret-key-12345",
+      ARK_MODEL: "ep-test-model",
+      ARK_BASE_URL: "https://ark.cn-beijing.volces.com/api/v3",
+    });
+
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const app = await createApp(config, mockService);
+
+    // Satisfies the endpoint allowlist prefix check, then normalises upward.
+    // Fastify's router normalises the path before matching, so this never
+    // reaches the handler at all; resolveUpstreamUrl is the second line of
+    // defence, covered by the unit tests below.
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/internal/llm-proxy/${agentId}/chat/completions/%2e%2e/%2e%2e/%2e%2e/admin`,
+      headers: {
+        authorization: `Bearer ${sessionToken}`,
+        "content-type": "application/json",
+      },
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(404);
+    // Whatever the routing outcome, nothing may reach the upstream provider.
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  describe("resolveUpstreamUrl", () => {
+    const base = "https://ark.cn-beijing.volces.com/api/v3";
+
+    it("resolves an allowed path under the configured base", () => {
+      expect(resolveUpstreamUrl(base, "chat/completions", "")?.toString()).toBe(
+        "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+      );
+    });
+
+    it("preserves the query string", () => {
+      expect(resolveUpstreamUrl(base, "models", "?limit=10")?.toString()).toBe(
+        "https://ark.cn-beijing.volces.com/api/v3/models?limit=10",
+      );
+    });
+
+    it("rejects traversal that climbs out of the base path", () => {
+      expect(resolveUpstreamUrl(base, "../../../etc/passwd", "")).toBeNull();
+      expect(
+        resolveUpstreamUrl(base, "chat/completions/../../../../admin", ""),
+      ).toBeNull();
+    });
+
+    it("keeps shallow traversal inside the configured base path", () => {
+      // Two segments up from chat/completions lands back on the base itself,
+      // so this stays in bounds; the endpoint allowlist is what restricts it.
+      expect(
+        resolveUpstreamUrl(base, "chat/completions/../../admin", "")?.pathname,
+      ).toBe("/api/v3/admin");
+    });
+
+    it("cannot be redirected to another origin by an absolute-looking path", () => {
+      const resolved = resolveUpstreamUrl(base, "https://attacker.example.com/steal", "");
+      expect(resolved?.origin).toBe("https://ark.cn-beijing.volces.com");
+    });
+  });
+
+  it("accepts request bodies larger than the 1 MiB application limit", async () => {
+    const sessionToken = SecretBroker.issueAgentSession(agentId);
+    const config = loadConfig({
+      NODE_ENV: "development",
+      HOST: "127.0.0.1",
+      ARK_API_KEY: "ark-real-secret-key-12345",
+      ARK_MODEL: "ep-test-model",
+      ARK_BASE_URL: "https://ark.cn-beijing.volces.com/api/v3",
+    });
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: "chat-large" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const app = await createApp(config, mockService);
+
+    // A long conversation: comfortably past the 1 MiB global bodyLimit.
+    const payload = {
+      model: "ep-test-model",
+      messages: [{ role: "user", content: "x".repeat(2 * 1024 * 1024) }],
+    };
+    expect(JSON.stringify(payload).length).toBeGreaterThan(1_048_576);
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/internal/llm-proxy/${agentId}/chat/completions`,
+      headers: {
+        authorization: `Bearer ${sessionToken}`,
+        "content-type": "application/json",
+      },
+      payload,
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().id).toBe("chat-large");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("bounds the upstream request with an abort signal", async () => {
+    const sessionToken = SecretBroker.issueAgentSession(agentId);
+    const config = loadConfig({
+      NODE_ENV: "development",
+      HOST: "127.0.0.1",
+      ARK_API_KEY: "ark-real-secret-key-12345",
+      ARK_MODEL: "ep-test-model",
+      ARK_BASE_URL: "https://ark.cn-beijing.volces.com/api/v3",
+    });
+
+    let interceptedSignal: unknown = undefined;
+    const fetchMock = vi.fn().mockImplementation((_url: string, init: RequestInit) => {
+      interceptedSignal = init.signal;
+      return Promise.resolve(
+        new Response(JSON.stringify({ id: "chat-signal" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const app = await createApp(config, mockService);
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/internal/llm-proxy/${agentId}/chat/completions`,
+      headers: {
+        authorization: `Bearer ${sessionToken}`,
+        "content-type": "application/json",
+      },
+      payload: { model: "ep-test-model", messages: [{ role: "user", content: "Hi" }] },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(interceptedSignal).toBeInstanceOf(AbortSignal);
   });
 });
 

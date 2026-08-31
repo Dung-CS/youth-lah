@@ -10,6 +10,47 @@ export const ALLOWED_LLM_ENDPOINTS = [
   "embeddings",
 ] as const;
 
+// Route prefix of the in-process LLM proxy.
+export const LLM_PROXY_PREFIX = "/api/internal/llm-proxy";
+
+// Model requests carry the whole conversation, so they routinely exceed the
+// 1 MiB application body limit. Scoped to the proxy route only.
+export const LLM_PROXY_BODY_LIMIT = 33_554_432;
+
+/**
+ * Resolves the upstream Ark URL for a proxied request path, rejecting anything
+ * that would escape the configured Ark base URL.
+ *
+ * The endpoint allowlist alone does not close this: a path such as
+ * "chat/completions/../../admin" satisfies the allowlist prefix check and then
+ * normalises upward at fetch time.
+ */
+export function resolveUpstreamUrl(
+  arkBaseUrl: string,
+  requestPath: string,
+  search: string,
+): URL | null {
+  let base: URL;
+  try {
+    base = new URL(arkBaseUrl);
+  } catch {
+    return null;
+  }
+  const basePath = base.pathname.replace(/\/+$/, "");
+  const suffix = requestPath.replace(/^\/+/, "");
+  let target: URL;
+  try {
+    // URL normalises "." and ".." segments, so a traversal attempt lands
+    // outside the base pathname and is rejected below.
+    target = new URL(basePath + "/" + suffix + search, base);
+  } catch {
+    return null;
+  }
+  if (target.origin !== base.origin) return null;
+  if (!target.pathname.startsWith(basePath + "/")) return null;
+  return target;
+}
+
 /**
  * Recursively removes unsupported/incompatible fields from LLM request payloads
  * (such as Codex-specific `external_web_access` inside tools or messages)
@@ -130,7 +171,7 @@ export class LlmProxyHandler {
       });
     }
 
-    // 4. Construct Upstream Target URL
+    // 4. Construct and validate the upstream target URL
     const baseUrl = config.arkBaseUrl.replace(/\/+$/, "");
     let targetPath = wildcardPath.replace(/^\/+/, "");
     if (baseUrl.endsWith("/api/v3") && targetPath.startsWith("api/v3/")) {
@@ -139,14 +180,17 @@ export class LlmProxyHandler {
     if (targetPath.startsWith("v1/")) {
       targetPath = targetPath.slice("v1/".length);
     }
-    let targetUrl = `${baseUrl}/${targetPath}`;
 
     // Preserve query parameters if present
     const rawUrl = request.raw.url || "";
     const queryIndex = rawUrl.indexOf("?");
-    if (queryIndex !== -1) {
-      targetUrl += rawUrl.slice(queryIndex);
+    const search = queryIndex === -1 ? "" : rawUrl.slice(queryIndex);
+
+    const upstream = resolveUpstreamUrl(baseUrl, targetPath, search);
+    if (!upstream) {
+      return reply.code(400).send({ error: "Invalid upstream path" });
     }
+    const targetUrl = upstream.toString();
 
     // 5. Build Upstream Headers (Injecting Host Master Key)
     const outgoingHeaders: Record<string, string> = {
@@ -193,12 +237,24 @@ export class LlmProxyHandler {
       const fetchOptions: RequestInit = {
         method: request.method,
         headers: outgoingHeaders,
+        // Bound the upstream call: without a signal a hung provider holds the
+        // request open indefinitely.
+        signal: AbortSignal.timeout(config.codexTimeoutMs),
       };
       if (bodyPayload !== undefined) {
         fetchOptions.body = bodyPayload;
       }
 
-      request.log.info({ targetUrl, bodyPayload }, "LLM proxy forwarding payload");
+      // Never log bodyPayload itself: it carries the entire conversation, and
+      // the logger's redact list only covers headers. Size is enough to debug
+      // forwarding without writing user prompts to disk.
+      request.log.info(
+        {
+          targetUrl,
+          bodyBytes: bodyPayload === undefined ? 0 : Buffer.byteLength(bodyPayload),
+        },
+        "LLM proxy forwarding request",
+      );
       const upstreamResponse = await fetch(targetUrl, fetchOptions);
 
       reply.code(upstreamResponse.status);
@@ -228,8 +284,35 @@ export class LlmProxyHandler {
   }
 }
 
-export function registerLlmProxy(app: FastifyInstance, config: AppConfig): void {
-  app.all("/api/internal/llm-proxy/:agentId/*", async (request, reply) => {
-    return LlmProxyHandler.handleProxyRequest(request, reply, config);
-  });
+export async function registerLlmProxy(
+  app: FastifyInstance,
+  config: AppConfig,
+): Promise<void> {
+  await app.register(
+    async (scope) => {
+      // Forward request bodies verbatim: the proxy must not reinterpret the
+      // payload, and the application-wide JSON limit is far too small here.
+      scope.removeAllContentTypeParsers();
+      scope.addContentTypeParser(
+        "*",
+        { parseAs: "buffer", bodyLimit: LLM_PROXY_BODY_LIMIT },
+        (
+          _request: FastifyRequest,
+          body: Buffer,
+          done: (err: Error | null, result?: unknown) => void,
+        ) => {
+          done(null, body);
+        },
+      );
+
+      scope.all(
+        "/:agentId/*",
+        { bodyLimit: LLM_PROXY_BODY_LIMIT },
+        async (request: FastifyRequest, reply: FastifyReply) => {
+          return LlmProxyHandler.handleProxyRequest(request, reply, config);
+        },
+      );
+    },
+    { prefix: LLM_PROXY_PREFIX },
+  );
 }
