@@ -1,3 +1,4 @@
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { AppConfig } from "./config.js";
@@ -24,7 +25,96 @@ export const SAFE_SYSTEM_ENV_ALLOWLIST = [
 const SENSITIVE_ENV_PATTERN =
   /(?:KEY|TOKEN|SECRET|PASS|AUTH|CREDENTIAL|PRIVATE|ARK_|VOLC_|AWS_|OPENAI_|GITHUB_|GH_|COOKIE)/i;
 
+export interface AgentSession {
+  token: string;
+  runId?: string | undefined;
+  createdAt: number;
+  expiresAt: number;
+}
+
 export class SecretBroker {
+  private static readonly activeSessions = new Map<string, AgentSession>();
+
+  /**
+   * Generates a cryptographically random, short-lived session token for an active agent run.
+   */
+  static issueAgentSession(
+    agentId: string,
+    runId?: string,
+    ttlMs = 600_000, // 10 minutes default
+  ): string {
+    const safeAgentId = agentId.replace(/[^a-zA-Z0-9_-]/g, "");
+    if (!safeAgentId) {
+      throw new Error("Invalid agentId for session token issuance");
+    }
+
+    const token = `ast_${randomBytes(24).toString("hex")}`;
+    const now = Date.now();
+    const session: AgentSession = {
+      token,
+      createdAt: now,
+      expiresAt: now + ttlMs,
+    };
+    if (runId !== undefined) {
+      session.runId = runId;
+    }
+    this.activeSessions.set(safeAgentId, session);
+
+    return token;
+  }
+
+  /**
+   * Constant-time verification of an agent session token.
+   */
+  static verifyAgentSession(agentId: string, token: string): boolean {
+    if (!agentId || !token) return false;
+    const safeAgentId = agentId.replace(/[^a-zA-Z0-9_-]/g, "");
+    const session = this.activeSessions.get(safeAgentId);
+    if (!session) return false;
+
+    if (Date.now() > session.expiresAt) {
+      this.activeSessions.delete(safeAgentId);
+      return false;
+    }
+
+    const expectedBuffer = Buffer.from(session.token);
+    const candidateBuffer = Buffer.from(token);
+    if (expectedBuffer.length !== candidateBuffer.length) {
+      return false;
+    }
+
+    return timingSafeEqual(candidateBuffer, expectedBuffer);
+  }
+
+  /**
+   * Revokes and cleans up an agent's active session token immediately upon run completion.
+   */
+  static revokeAgentSession(agentId: string): void {
+    const safeAgentId = agentId.replace(/[^a-zA-Z0-9_-]/g, "");
+    if (safeAgentId) {
+      this.activeSessions.delete(safeAgentId);
+    }
+  }
+
+  /**
+   * Clears all active agent sessions (primarily used for test isolation).
+   */
+  static resetSessions(): void {
+    this.activeSessions.clear();
+  }
+
+  /**
+   * Returns the internal LLM reverse proxy base URL for an agent.
+   */
+  static getAgentProxyUrl(
+    agentId: string,
+    config: AppConfig,
+    host = "host.docker.internal",
+  ): string {
+    const safeAgentId = agentId.replace(/[^a-zA-Z0-9_-]/g, "");
+    return `http://${host}:${config.port}/api/internal/llm-proxy/${safeAgentId}`;
+  }
+
   /**
    * Checks if an environment variable key name indicates sensitive credential data.
    */
@@ -54,7 +144,7 @@ export class SecretBroker {
       }
     }
 
-    // Apply explicit runtime overrides (e.g. per-agent CODEX_HOME, model API key for Codex)
+    // Apply explicit runtime overrides (e.g. per-agent CODEX_HOME, session token for Codex)
     if (options?.overrides) {
       for (const [key, value] of Object.entries(options.overrides)) {
         if (value !== undefined) {
@@ -79,14 +169,21 @@ export class SecretBroker {
 
   /**
    * Ensures an isolated CODEX_HOME directory exists for an agent and writes
-   * its private configuration with restricted permissions (0o600).
+   * its private configuration pointing to the host LLM reverse proxy.
    */
   static async ensureAgentCodexHome(
     agentId: string,
     config: AppConfig,
+    options?: { proxyHost?: string },
   ): Promise<string> {
     const agentHome = this.getAgentCodexHome(agentId, config.codexHome);
     await mkdir(agentHome, { recursive: true, mode: 0o700 });
+
+    const proxyUrl = this.getAgentProxyUrl(
+      agentId,
+      config,
+      options?.proxyHost ?? (config.runtimeProvider === "container" ? "host.docker.internal" : "127.0.0.1"),
+    );
 
     const toml = [
       "# Isolated Codex configuration for agent " + agentId,
@@ -95,8 +192,8 @@ export class SecretBroker {
       "",
       "[model_providers.volcengine_ark]",
       'name = "Volcengine Ark"',
-      "base_url = " + JSON.stringify(config.arkBaseUrl),
-      'env_key = "ARK_API_KEY"',
+      "base_url = " + JSON.stringify(proxyUrl),
+      'env_key = "AGENT_SESSION_TOKEN"',
       'wire_api = "responses"',
       "requires_openai_auth = false",
       "",
@@ -125,4 +222,3 @@ export class SecretBroker {
     }
   }
 }
-

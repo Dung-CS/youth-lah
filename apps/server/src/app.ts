@@ -8,6 +8,9 @@ import type { AppConfig } from "./config.js";
 import { HttpError } from "./errors.js";
 import { ErrorSanitizer } from "./error-sanitizer.js";
 import { OutboundDlpRedactor } from "./outbound-dlp.js";
+import { registerSecurityHeaders } from "./security-headers.js";
+import { registerCsrfGuard } from "./csrf-guard.js";
+import { registerLlmProxy } from "./llm-proxy.js";
 import type { AgentService } from "./agent-service.js";
 import { consumeRateLimit } from "./rate-limit.js";
 
@@ -39,6 +42,13 @@ export async function createApp(
     bodyLimit: 1_048_576,
   });
 
+  // Layer 1 Defenses: HTTP Security Headers, CSRF Protection
+  registerSecurityHeaders(app, config);
+  registerCsrfGuard(app, config);
+
+  // Layer 2 Defenses: Host-Side LLM Secret Broker & Reverse Proxy
+  registerLlmProxy(app, config);
+
   await app.register(cors, {
     origin:
       config.nodeEnv === "development"
@@ -51,7 +61,8 @@ export async function createApp(
       !config.authToken ||
       !request.url.startsWith("/api/") ||
       request.url === "/api/health" ||
-      request.url === "/api/auth"
+      request.url === "/api/auth" ||
+      request.url.startsWith("/api/internal/llm-proxy/")
     ) {
       return;
     }
