@@ -15,7 +15,7 @@ Autonomous AI coding agents possess shell execution and file modification capabi
 5. **Evasion Obfuscation**: Attackers easily bypass naive keyword filters using Cyrillic lookalike homoglyphs (`а` vs `a`), Base64/URL encoding, or indirect coding requests (*"write a script that reads process.env"*).
 
 ### Why Defense-in-Depth?
-A single barrier or client-side prompt check is insufficient. If a prompt bypasses the input filter via indirect phrasing, downstream security layers must guarantee that secrets are absent from the runtime environment, network egress is restricted, and any leaked tokens in tool outputs are redacted before reaching the client.
+A single barrier or client-side prompt check is insufficient. If a prompt bypasses the input filter via indirect phrasing, downstream security layers must guarantee that **secrets** are **absent from the runtime environment**, **network egress** is **restricted**, and any **leaked tokens** in tool outputs are **redacted** before reaching the client.
 
 ---
 
