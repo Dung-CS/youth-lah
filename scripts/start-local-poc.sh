@@ -15,6 +15,14 @@ log() {
   printf '[local-poc] %s\n' "$*" >&2
 }
 
+if [[ -f .env ]]; then
+  log "Loading configuration from .env"
+  set -a
+  # shellcheck disable=SC1091
+  source .env
+  set +a
+fi
+
 engine_works() {
   "$1" info >/dev/null 2>&1
 }
